@@ -249,8 +249,8 @@ function refreshRow(i, soft) {
   const it = items[i]; const old = $(`#list [data-i="${i}"]`); if (!it || !old) return;
   const nu = buildRow(it, i); nu.style.animation = 'none'; old.replaceWith(nu);
   stageDirty = true; save();
-  if (it.rebuild && !soft) render(true);
-  else if (it.rebuild) { clearTimeout(T.rb); T.rb = setTimeout(() => render(true), 250); }
+  if (it.rebuild && !soft) softRender();
+  else if (it.rebuild) { clearTimeout(T.rb); T.rb = setTimeout(() => softRender(), 250); }
   if (it.onchange) it.onchange();
 }
 function nudge(it, dir) {
@@ -512,7 +512,7 @@ function srcMap(c) {
     if (b.role === 'cam') el.addEventListener('pointerdown', (e) => { e.preventDefault(); el.setPointerCapture(e.pointerId); const mr = map.getBoundingClientRect(); const sx = e.clientX, sy = e.clientY, ox = c.layout.camX, oy = c.layout.camY;
       const fx = (1 - r.w / v.w) * mr.width, fy = (1 - r.h / v.h) * mr.height;
       const mv = (ev) => { if (fx > 0) c.layout.camX = clamp(ox + (ev.clientX - sx) / fx, 0, 1); if (fy > 0) c.layout.camY = clamp(oy + (ev.clientY - sy) / fy, 0, 1); const nb = Shared.computeLayout(c.layout, v.w, v.h).boxes.find((x) => x.role === 'cam').crop; el.style.left = (nb.x / v.w) * 100 + '%'; el.style.top = (nb.y / v.h) * 100 + '%'; stageDirty = true; };
-      const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); save(); render(true); };
+      const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); save(); refreshList(); renderFxOverlay(T.stageClip); };
       el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); }); });
   return h('div', {}, h('div', { class: 'cap' }, 'Source map'), map, h('div', { class: 'pdesc', style: 'font-size:12px', html: 'White: gameplay crop.<br><b>Pink: facecam – drag to move.</b>' }));
 }
@@ -546,6 +546,8 @@ function pageHeads() {
 
 
 // ---------- EFFECTS ----------
+// effects/sounds: refresh list + boxes only, never remount the preview
+function softRender() { if (S.tab === 'effects' || S.tab === 'sounds') { refreshList(); renderFxOverlay(T.stageClip); } else render(true); }
 const FX_NAMES = { pixelate: 'Pixelate', blur: 'Blur', bw: 'Black & white' };
 const relNow = (c) => clamp(V.currentTime - c.start, 0, c.end - c.start);
 function renderFxOverlay(c) {
@@ -569,7 +571,7 @@ function dragFx(e, f, mode, el) {
     w = Math.max(48, w); hh = Math.max(48, hh); x = clamp(x, 0, 1080 - w); y = clamp(y, 0, 1920 - hh);
     Object.assign(f, { x, y, w, h: hh }); el.style.left = x / 10.8 + '%'; el.style.top = y / 19.2 + '%'; el.style.width = w / 10.8 + '%'; el.style.height = hh / 19.2 + '%'; stageDirty = true;
   };
-  const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); save(); render(true); };
+  const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); save(); refreshList(); renderFxOverlay(T.stageClip); };
   el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
 }
 function pageEffects() {
@@ -579,8 +581,8 @@ function pageEffects() {
   const f = c.fx.find((x) => x.id === T.fxSel);
   L.push(sec('Effect areas'));
   if (!c.fx.length) L.push({ type: 'custom', node: h('div', { class: 'empty' }, 'No effects yet. Add one below, then drag the box on the preview.') });
-  c.fx.forEach((x) => L.push({ type: 'clip', label: (x.id === T.fxSel ? '▶ ' : '') + FX_NAMES[x.type], value: `${fmt(x.start)} → ${fmt(x.end)}`, fn: () => { T.fxSel = x.id; render(true); }, mini: [['✕', 'Delete', () => { c.fx = c.fx.filter((y) => y !== x); save(); render(true); }]], desc: 'Click to select. Drag the box on the preview to move it, drag the corner dots to resize.' }));
-  const add = (type) => () => { const s0 = relNow(c), nf = { id: uid(), type, x: 340, y: 700, w: 400, h: 400, start: s0, end: Math.min(dur, s0 + 3), amount: type === 'pixelate' ? 28 : 24 }; if (nf.end - nf.start < 0.5) { nf.start = Math.max(0, dur - 3); nf.end = dur; } c.fx.push(nf); T.fxSel = nf.id; save(); render(true); };
+  c.fx.forEach((x) => L.push({ type: 'clip', label: (x.id === T.fxSel ? '▶ ' : '') + FX_NAMES[x.type], value: `${fmt(x.start)} → ${fmt(x.end)}`, fn: () => { T.fxSel = x.id; softRender(); }, mini: [['✕', 'Delete', () => { c.fx = c.fx.filter((y) => y !== x); save(); softRender(); }]], desc: 'Click to select. Drag the box on the preview to move it, drag the corner dots to resize.' }));
+  const add = (type) => () => { const s0 = relNow(c), nf = { id: uid(), type, x: 340, y: 700, w: 400, h: 400, start: s0, end: Math.min(dur, s0 + 3), amount: type === 'pixelate' ? 28 : 24 }; if (nf.end - nf.start < 0.5) { nf.start = Math.max(0, dur - 3); nf.end = dur; } c.fx.push(nf); T.fxSel = nf.id; save(); softRender(); };
   L.push(actionRow('Add pixelate area', add('pixelate'), { desc: 'Censors something (faces, names, chat, numbers) with big pixels. Starts at the current playhead and lasts 3 s – change the timing below.' }));
   L.push(actionRow('Add blur area', add('blur'), { desc: 'Soft blur over an area, timed.' }));
   L.push(actionRow('Add black & white area', add('bw'), { desc: 'Turns just this area black & white for a moment. Make it cover the whole frame for a full-screen B&W moment.' }));
@@ -592,8 +594,8 @@ function pageEffects() {
     if (f.type !== 'bw') L.push(rangeRow(f.type === 'pixelate' ? 'Pixel size' : 'Blur strength', () => f.amount || 28, (v) => (f.amount = v), 4, 100, 2, (v) => v + ' px', { desc: 'Larger = stronger censoring.' }));
     L.push(rangeRow('Starts at', () => f.start, setS, 0, dur, 0.1, (v) => fmt(v) + ' s', { rebuild: true, desc: 'When the effect switches on (seconds from the start of the clip).' }));
     L.push(rangeRow('Ends at', () => f.end, setE, 0, dur, 0.1, (v) => fmt(v) + ' s', { rebuild: true, desc: 'When the effect switches off.' }));
-    L.push(actionRow('Start = playhead', () => { setS(relNow(c)); save(); render(true); }, { desc: 'Scrub the preview to the right moment, then use this to set the start exactly.' }));
-    L.push(actionRow('End = playhead', () => { setE(relNow(c)); save(); render(true); }));
+    L.push(actionRow('Start = playhead', () => { setS(relNow(c)); save(); softRender(); }, { desc: 'Scrub the preview to the right moment, then use this to set the start exactly.' }));
+    L.push(actionRow('End = playhead', () => { setE(relNow(c)); save(); softRender(); }));
     L.push(rangeRow('Position X', () => Shared.fxRect(f).x / 1080, (v) => { const r = Shared.fxRect(f); f.x = v * 1080; f.w = r.w; f.y = r.y; f.h = r.h; }, 0, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
     L.push(rangeRow('Position Y', () => Shared.fxRect(f).y / 1920, (v) => { const r = Shared.fxRect(f); f.y = v * 1920; f.w = r.w; f.x = r.x; f.h = r.h; }, 0, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
     L.push(rangeRow('Width', () => Shared.fxRect(f).w / 1080, (v) => { f.w = Math.max(48, v * 1080); }, 0.05, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
@@ -610,15 +612,15 @@ function pageSounds() {
   const sn = c.sounds.find((x) => x.id === T.sndSel);
   L.push(sec('Sounds on this clip'));
   if (!c.sounds.length) L.push({ type: 'custom', node: h('div', { class: 'empty' }, 'No sounds yet. Add a file, then trim it and place it on the timeline.') });
-  c.sounds.forEach((x) => { const len = Math.min((x.trimOut > (x.trimIn || 0) ? x.trimOut : x.dur) - (x.trimIn || 0), dur - x.at); L.push({ type: 'clip', label: (x.id === T.sndSel ? '▶ ' : '') + x.name, value: `at ${fmt(x.at)} · ${fmt(Math.max(0, len))}s`, fn: () => { T.sndSel = x.id; render(true); }, mini: [['✕', 'Remove sound', () => { c.sounds = c.sounds.filter((y) => y !== x); delete T.audios[x.id]; save(); render(true); }]], desc: 'Click to select and edit this sound.' }); });
+  c.sounds.forEach((x) => { const len = Math.min((x.trimOut > (x.trimIn || 0) ? x.trimOut : x.dur) - (x.trimIn || 0), dur - x.at); L.push({ type: 'clip', label: (x.id === T.sndSel ? '▶ ' : '') + x.name, value: `at ${fmt(x.at)} · ${fmt(Math.max(0, len))}s`, fn: () => { T.sndSel = x.id; softRender(); }, mini: [['✕', 'Remove sound', () => { c.sounds = c.sounds.filter((y) => y !== x); delete T.audios[x.id]; save(); softRender(); }]], desc: 'Click to select and edit this sound.' }); });
   L.push(actionRow('Add sound from file…', async () => {
-    try { const r = await api.pickSound(); if (!r) return; const at = Math.min(relNow(c), Math.max(0, dur - 0.5)); const nsn = { id: r.id, path: r.path, name: r.name, dur: r.dur, at, trimIn: 0, trimOut: r.dur, vol: 1, fade: 0.2 }; c.sounds.push(nsn); T.sndSel = nsn.id; save(); toast(`“${r.name}” added at ${fmt(at)}.`); render(true); }
+    try { const r = await api.pickSound(); if (!r) return; const at = Math.min(relNow(c), Math.max(0, dur - 0.5)); const nsn = { id: r.id, path: r.path, name: r.name, dur: r.dur, at, trimIn: 0, trimOut: r.dur, vol: 1, fade: 0.2 }; c.sounds.push(nsn); T.sndSel = nsn.id; save(); toast(`“${r.name}” added at ${fmt(at)}.`); softRender(); }
     catch (e) { toast(e.message, true); }
   }, { desc: 'MP3, WAV, OGG, M4A, FLAC … The sound starts at the current playhead position. Press <b>Space</b> in the preview to hear the mix.' }));
   if (sn) {
     L.push(sec('Selected sound'));
     L.push(rangeRow('Starts in clip at', () => sn.at, (v) => (sn.at = v), 0, Math.max(0.1, dur - 0.1), 0.1, (v) => fmt(v) + ' s', { rebuild: true, desc: 'Where in the clip the sound begins.' }));
-    L.push(actionRow('Place at playhead', () => { sn.at = Math.min(relNow(c), Math.max(0, dur - 0.1)); save(); render(true); }, { desc: 'Scrub the preview to the right moment, then click to place the sound exactly there.' }));
+    L.push(actionRow('Place at playhead', () => { sn.at = Math.min(relNow(c), Math.max(0, dur - 0.1)); save(); softRender(); }, { desc: 'Scrub the preview to the right moment, then click to place the sound exactly there.' }));
     L.push(rangeRow('Trim: start', () => sn.trimIn || 0, (v) => { sn.trimIn = v; if ((sn.trimOut || sn.dur) <= v + 0.1) sn.trimOut = Math.min(sn.dur, v + 0.5); }, 0, Math.max(0.1, sn.dur - 0.1), 0.05, (v) => v.toFixed(2) + ' s', { rebuild: true, desc: 'Cut off the beginning of the sound file.' }));
     L.push(rangeRow('Trim: end', () => sn.trimOut > (sn.trimIn || 0) ? sn.trimOut : sn.dur, (v) => { sn.trimOut = v; if (v <= (sn.trimIn || 0) + 0.1) sn.trimIn = Math.max(0, v - 0.5); }, 0.1, sn.dur, 0.05, (v) => v.toFixed(2) + ' s', { rebuild: true, desc: 'Cut off the end of the sound file.' }));
     L.push(rangeRow('Volume', () => (sn.vol == null ? 1 : sn.vol), (v) => (sn.vol = v), 0, 2, 0.05, (v) => Math.round(v * 100) + ' %', { desc: 'Above 100 % boosts the sound in the export (the preview plays at most 100 %).' }));
@@ -788,6 +790,11 @@ function renderRight() {
   const node = rightFor(it && it.type !== 'sec' ? it : null);
   if (node && !(it && it.desc == null && S.tab === 'settings')) r.replaceChildren(node);
   if (it && it.desc && ['home', 'editor'].includes(S.tab) && it.type !== 'video' && it.type !== 'clip' && node) node.append(h('div', { class: 'pdesc', html: it.desc }));
+}
+// rebuild only the left list (keeps the preview/video untouched, no flicker)
+function refreshList() {
+  const list = $('#list'), scroll = list.scrollTop; items = PAGE[S.tab][0]();
+  if (!items[T.row]) T.row = 0; list.replaceChildren(...items.map((it, i) => buildRow(it, i))); list.scrollTop = scroll; updateCounter();
 }
 let lastTab = null;
 function render(keep) {
