@@ -103,7 +103,7 @@ const MODELS = { base: ['ggml-base.bin', 148], small: ['ggml-small.bin', 488], m
 const modelsDir = () => { const d = path.join(userDir(), 'models'); fs.mkdirSync(d, { recursive: true }); return d; };
 async function ensureModel(name) {
   const [file] = MODELS[name] || MODELS.base;
-  if (name === 'base' || !MODELS[name]) return MODEL;
+  if ((name === 'base' || !MODELS[name]) && fs.existsSync(MODEL)) return MODEL; // older installs shipped base
   const dest = path.join(modelsDir(), file);
   if (fs.existsSync(dest)) return dest;
   const https = require('https'); const tmp = dest + '.part';
@@ -122,10 +122,14 @@ async function ensureModel(name) {
 
 async function transcribe({ clipId, videoPath, start, end, lang, threads, model, engine, apiKey }) {
   if (engine === 'elevenlabs') return transcribeEleven({ run, FFMPEG, emit, Shared }, { clipId, videoPath, start, end, lang, apiKey });
-  if (!fs.existsSync(WHISPER) || !fs.existsSync(MODEL)) throw new Error('Whisper files are missing from the installation.');
+  if (!fs.existsSync(WHISPER)) throw new Error('Whisper files are missing from the installation.');
   emit('transcribe', { clipId, pct: 1, msg: 'Preparing model…' });
   let modelPath = MODEL;
-  try { modelPath = await ensureModel(model || 'small'); } catch (e) { emit('transcribe', { clipId, pct: 1, msg: 'Using built-in model' }); if (!/Model download/.test(e.message)) throw e; }
+  try { modelPath = await ensureModel(model || 'small'); } catch (e) {
+    const have = [MODEL, ...Object.values(MODELS).map(([f]) => path.join(modelsDir(), f))].find((f) => fs.existsSync(f));
+    if (!have || !/Model download/.test(e.message)) throw e;
+    emit('transcribe', { clipId, pct: 1, msg: 'Offline – using an already downloaded model' }); modelPath = have;
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clipwave-w-'));
   try {
     const wav = path.join(tmp, 'a.wav');
@@ -336,7 +340,7 @@ const wrap = (fn) => async (_e, ...a) => { try { return { ok: true, data: await 
 
 ipcMain.handle('state:load', wrap(() => { try { return JSON.parse(fs.readFileSync(stateFile(), 'utf8')); } catch { return null; } }));
 ipcMain.handle('state:save', wrap((s) => { fs.mkdirSync(userDir(), { recursive: true }); const t = stateFile() + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, stateFile()); return true; }));
-ipcMain.handle('env', wrap(() => ({ videos: app.getPath('videos'), whisper: fs.existsSync(WHISPER) && fs.existsSync(MODEL), cpus: os.cpus().length, version: app.getVersion() })));
+ipcMain.handle('env', wrap(() => ({ videos: app.getPath('videos'), whisper: fs.existsSync(WHISPER), cpus: os.cpus().length, version: app.getVersion() })));
 ipcMain.handle('video:url', wrap(importUrl));
 ipcMain.handle('video:file', wrap(async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Import video', properties: ['openFile'], filters: [{ name: 'Video', extensions: ['mp4', 'mkv', 'mov', 'webm', 'avi', 'm4v'] }] });
