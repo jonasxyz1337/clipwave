@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; media-src 'self' file:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipwave</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="bg"><div class="glow g1"></div><div class="glow g2"></div><svg id="palms" viewBox="0 0 900 600" preserveAspectRatio="xMaxYMax meet"></svg></div>
+<div id="app">
+  <header>
+    <div class="titlebar">
+      <h1>CLIPWAVE</h1><span class="sub" id="crumb"></span>
+      <div class="spacer"></div>
+      <div id="bgjob" class="bgjob hidden"><div class="bar"><i></i></div><span></span></div>
+    </div>
+    <nav id="tabs"><kbd class="shoulder">Q</kbd><div id="tablist"></div><kbd class="shoulder">E</kbd></nav>
+  </header>
+  <main>
+    <section id="left"><div id="list"></div></section>
+    <aside id="right"></aside>
+  </main>
+  <footer>
+    <div id="counter"></div>
+    <div class="hints">
+      <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+      <span><kbd>←</kbd><kbd>→</kbd> Change</span>
+      <span><kbd>↵</kbd> Select</span>
+      <span><kbd>Space</kbd> Play</span>
+    </div>
+  </footer>
+</div>
+<div id="toasts"></div>
+<div id="modal" class="hidden"></div>
+<script src="shared.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
