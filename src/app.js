@@ -213,7 +213,7 @@ function valueNode(it) {
   if (it.type === 'range') return h('div', { class: 'val' }, h('span', { class: 't' }, it.f(v)), h('span', { class: 'arr', onclick: (e) => { e.stopPropagation(); nudge(it, -1); } }, '‹'), h('span', { class: 'arr', onclick: (e) => { e.stopPropagation(); nudge(it, 1); } }, '›'));
   if (it.type === 'toggle') return h('div', { class: 'val' }, h('span', { class: 'tog' + (v ? ' on' : '') }));
   if (it.type === 'color') return h('div', { class: 'val' }, h('span', { class: 't' }, String(v).toUpperCase()), h('span', { class: 'sw', style: `background:${v}` }));
-  if (it.type === 'action') return it.value ? h('div', { class: 'val' }, h('span', { class: 't' }, typeof it.value === 'function' ? it.value() : it.value)) : h('div', { class: 'val' });
+  if (it.type === 'action') return h('div', { class: 'val' }, it.value ? h('span', { class: 't' }, typeof it.value === 'function' ? it.value() : it.value) : null, h('span', { class: 'go' }, '›'));
   return h('div', { class: 'val' });
 }
 function buildRow(it, i) {
@@ -796,6 +796,12 @@ function refreshList() {
   const list = $('#list'), scroll = list.scrollTop; items = PAGE[S.tab][0]();
   if (!items[T.row]) T.row = 0; list.replaceChildren(...items.map((it, i) => buildRow(it, i))); list.scrollTop = scroll; updateCounter();
 }
+// entrance animation only on tab switch; class is removed afterwards so later row rebuilds don't replay it
+function playIn(...els) {
+  clearTimeout(T.pageInT);
+  for (const el of els) { el.classList.remove('page-in'); void el.offsetWidth; el.classList.add('page-in'); }
+  T.pageInT = setTimeout(() => els.forEach((el) => el.classList.remove('page-in')), 650);
+}
 let lastTab = null;
 function render(keep) {
   const [pg] = PAGE[S.tab]; const scroll = $('#list').scrollTop;
@@ -805,7 +811,7 @@ function render(keep) {
   const f = focusable(); if (!items[T.row] || !f.some(([, i]) => i === T.row)) T.row = f.length ? f[0][1] : 0;
   const preferSel = items.findIndex((x) => x.sel); if (!keep && preferSel >= 0) T.row = preferSel;
   const list = $('#list'); list.replaceChildren(...items.map((it, i) => buildRow(it, i)));
-  if (lastTab !== S.tab) { list.classList.remove('page-in'); void list.offsetWidth; list.classList.add('page-in'); $('#right').classList.remove('page-in'); void $('#right').offsetWidth; $('#right').classList.add('page-in'); }
+  if (lastTab !== S.tab) playIn(list, $('#right'));
   list.scrollTop = keep ? scroll : 0; lastTab = S.tab;
   $('#tablist').querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.t === S.tab));
   const v = vidOf(null); const c = curClip(); $('#crumb').textContent = v ? `${v.title}${c ? '  ›  ' + c.name : ''}` : 'No video loaded';

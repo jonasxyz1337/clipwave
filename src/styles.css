@@ -187,3 +187,28 @@ input[type=color] { position: absolute; opacity: 0; pointer-events: none; width:
 .fxbox .hd { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid var(--pop); border-radius: 50%; }
 .fxbox .hd.nw { left: -7px; top: -7px; cursor: nwse-resize; } .fxbox .hd.ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .fxbox .hd.sw { left: -7px; bottom: -7px; cursor: nesw-resize; } .fxbox .hd.se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+
+/* ---------- clearer, friendlier controls ---------- */
+.row { border-radius: 6px; transition: color .15s, background .15s; }
+.row::before { border-radius: 6px; }
+.row:not(.sel):hover { background: rgba(255,255,255,.07); }
+.row.action { margin: 5px 0; min-height: 40px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); box-shadow: 0 2px 10px rgba(20,0,40,.15); cursor: pointer; transition: background .15s, border-color .15s, transform .12s, box-shadow .15s; }
+.row.action .lbl { font-weight: 600; letter-spacing: .01em; }
+.row.action:not(.sel):hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.45); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(20,0,40,.25); }
+.row.action:active { transform: translateY(0) scale(.99); }
+.row.action.sel { border-color: #fff; }
+.row .go { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; line-height: 1; background: var(--pop); color: #fff; box-shadow: 0 2px 8px rgba(255,79,216,.45); transition: transform .15s; }
+.row.action:hover .go { transform: translateX(2px); }
+.row .arr { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 15px; transition: background .15s, transform .12s; }
+.row .arr:hover { background: rgba(255,255,255,.22); transform: scale(1.1); }
+.row.sel .arr:hover { background: rgba(42,17,56,.12); }
+.row .mini button { border-radius: 6px; transition: background .15s, transform .12s; }
+.row .mini button:hover { transform: scale(1.08); }
+.row.clip, .row.video, .row.hist { cursor: pointer; }
+.btn { border-radius: 8px; padding: 9px 20px; box-shadow: 0 2px 10px rgba(20,0,40,.2); }
+.btn.fill { background: linear-gradient(135deg, #fff, #ffe4f8); border-color: #fff; }
+.btn.fill:hover { background: linear-gradient(135deg, var(--pop), #b84dff); box-shadow: 0 6px 20px rgba(255,79,216,.45); }
+.btn:hover { transform: translateY(-1px); }
+.tab { border-radius: 3px; transition: background .15s, color .15s; }
+.tab:not(.on):hover { background: rgba(255,255,255,.14); }
+.row:focus-visible, .btn:focus-visible, .tab:focus-visible { outline: 2px solid var(--pop); outline-offset: 2px; }
