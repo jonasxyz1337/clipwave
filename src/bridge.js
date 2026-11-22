@@ -149,6 +149,7 @@
     [sub.font, head.font, 'Bahnschrift', Shared.HOOK_STYLE.font].forEach((f) => (Shared.FONTS[f] || []).forEach((x) => fonts.add(x)));
     return {
       jobId: job.jobId, out: job.out, total: hl + dur + od, fonts: [...fonts],
+      fontsMac: [...new Set(['Arial.ttf', 'Arial Bold.ttf', ...[sub.font, head.font, 'Bahnschrift'].flatMap((f) => Shared.FONTS_MAC[f] || [])])],
       files: { ...files, 'subs.ass': Shared.buildAss({ words, dur, sub, head, showSubs: job.subsOn, showHead: false }), 'head.ass': Shared.buildAss({ words: [], dur, sub, head, showSubs: false, showHead: job.headOn }) },
       variants: tries.map((t) => [...base, ...enc[t], ...tail]),
     };

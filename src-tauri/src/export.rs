@@ -22,8 +22,10 @@ pub struct Spec {
     job_id: String,
     /// small text files the graph reads, by plain file name (captions .ass, outro concat list, …)
     files: std::collections::HashMap<String, String>,
-    /// font file names to copy from C:\Windows\Fonts for libass
+    /// font file names to copy for libass (Windows names / macOS names)
     fonts: Vec<String>,
+    #[serde(default)]
+    fonts_mac: Vec<String>,
     /// ffmpeg argument lists to try in order (e.g. NVENC first, then x264)
     variants: Vec<Vec<String>>,
     out: String,
@@ -35,9 +37,17 @@ fn export_one_blocking(app: &AppHandle, sp: Spec) -> Res<u64> {
     let tmp = tempfile::Builder::new().prefix("clipwave-e-").tempdir().map_err(|e| e.to_string())?;
     let fdir = tmp.path().join("fonts");
     std::fs::create_dir_all(&fdir).map_err(|e| e.to_string())?;
-    let win_fonts = PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
-    for f in &sp.fonts {
-        let _ = std::fs::copy(win_fonts.join(f), fdir.join(f));
+    // libass reads the fonts from this folder: copy the ones the captions use from the system font folders
+    let (dirs, files) = if cfg!(windows) {
+        (vec![PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts")], &sp.fonts)
+    } else {
+        let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+        (vec![PathBuf::from("/System/Library/Fonts/Supplemental"), PathBuf::from("/System/Library/Fonts"), PathBuf::from("/Library/Fonts"), home.join("Library/Fonts")], &sp.fonts_mac)
+    };
+    for f in files {
+        if let Some(src) = dirs.iter().map(|d| d.join(f)).find(|p| p.exists()) {
+            let _ = std::fs::copy(src, fdir.join(f));
+        }
     }
     for (name, content) in &sp.files {
         // only plain file names, written inside our own temp folder

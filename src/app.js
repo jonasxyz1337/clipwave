@@ -386,7 +386,7 @@ function addClip() {
   const sub = clone(base ? base.sub : SUB_PRESETS[S.settings.subPreset] ? { ...SUB_PRESETS[S.settings.subPreset], preset: S.settings.subPreset } : { ...SUB_PRESETS['Impact Pop'], preset: 'Impact Pop' });
   const head = clone(base ? { ...base.head, text: '' } : { ...HEAD_PRESETS['Bold Statement'], text: '' });
   const n = S.clips.filter((c) => c.videoId === v.id).length + 1;
-  const c = { id: uid(), videoId: v.id, name: `Clip ${n}`, start: T.range.start, end: T.range.end, words: null, subsOn: true, headOn: true, layout: clone(base ? base.layout : DEFAULT_LAYOUT), sub, head, outro: clone(base && base.outro ? base.outro : Shared.DEFAULT_OUTRO), fx: [], sounds: [], origVol: 1, hook: clone(Shared.DEFAULT_HOOK), gfx: [] };
+  const c = { id: uid(), videoId: v.id, name: `Clip ${n}`, start: T.range.start, end: T.range.end, words: null, subsOn: false, headOn: true, layout: clone(base ? base.layout : DEFAULT_LAYOUT), sub, head, outro: clone(base && base.outro ? base.outro : Shared.DEFAULT_OUTRO), fx: [], sounds: [], origVol: 1, hook: clone(Shared.DEFAULT_HOOK), gfx: [] };
   S.clips.unshift(c); S.selClip = c.id; save(); toast(`${c.name} added (${fmt(c.end - c.start)}s).`);
   if (S.settings.autoTranscribe) transcribeClip(c);
   render(true);
@@ -465,7 +465,7 @@ function pageSubs() {
   L.push(actionRow(busy ? 'Transcribing…' : c.words ? 'Re-generate subtitles' : 'Generate subtitles (Whisper)', () => transcribeClip(c), { value: busy ? `${Math.round(busy.pct)}%` : c.words ? `${c.words.length} words` : 'not generated', progress: busy ? h('div', { class: 'pbar' }, h('i', { style: `width:${busy.pct}%` })) : null, desc: SUB_DESCS['Generate subtitles'] }));
   if (S.settings.engine !== 'whisper' && !(S.settings.elKey || '').trim()) L.push(actionRow('Connect ElevenLabs for accurate subtitles (1 click)', connectEleven, { desc: 'Without a key the offline Whisper model is used, which is less accurate. Add an ElevenLabs API key in Settings for much better words and timing.' }));
   L.push(enumRow('Language', () => S.settings.lang, (v) => (S.settings.lang = v), LANGS, { desc: SUB_DESCS.Language }));
-  L.push(toggleRow('Show subtitles', () => c.subsOn, (v) => (c.subsOn = v), { desc: 'Burn the subtitles into the exported video.' }));
+  L.push(toggleRow('Show subtitles', () => c.subsOn, (v) => { c.subsOn = v; if (v && !c.words && !T.busy[c.id]) transcribeClip(c); }, { desc: 'Off by default. Switch on to burn subtitles into the video – the speech is transcribed automatically if that has not happened yet.' }));
   L.push(sec('Style'));
   L.push(enumRow('Preset', () => s().preset || 'Custom', (v) => { const p = presets[v]; c.sub = { ...clone(p), preset: v }; }, Object.keys(presets), { rebuild: true, desc: 'Start from a ready-made look. Everything below can still be tweaked.' }));
   L.push(enumRow('Animation', () => s().mode, (v) => (s().mode = v), [['highlight', 'Word highlight'], ['word', 'Single word'], ['static', 'Static line']], { rebuild: true, desc: SUB_DESCS.Mode }));

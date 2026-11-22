@@ -1,0 +1,96 @@
+# Builds the macOS (Apple Silicon) version on a GitHub Mac whenever a release is published
+# (scripts/release.js publishes the Windows build), and attaches it to that release.
+# With the TAURI_SIGNING_PRIVATE_KEY secret set, the Mac build also gets auto-updates (latest.json).
+name: macOS build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (e.g. v2.3.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Bundled tools (ffmpeg, ffprobe, yt-dlp, whisper.cpp)
+        run: |
+          set -euo pipefail
+          mkdir -p bin/whisper dl
+          # static arm64 ffmpeg builds (with libass for the captions)
+          curl -fsSL -o dl/ffmpeg.zip  "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"
+          curl -fsSL -o dl/ffprobe.zip "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffprobe.zip"
+          unzip -o -q dl/ffmpeg.zip -d dl/ffmpeg && unzip -o -q dl/ffprobe.zip -d dl/ffprobe
+          cp "$(find dl/ffmpeg -type f -name ffmpeg | head -1)" bin/ffmpeg
+          cp "$(find dl/ffprobe -type f -name ffprobe | head -1)" bin/ffprobe
+          curl -fsSL -o bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+          cp assets/outro-sound.ogg bin/
+          # whisper.cpp, static, with Metal (GPU)
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp dl/whisper.cpp
+          cmake -S dl/whisper.cpp -B dl/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF
+          cmake --build dl/whisper.cpp/build --target whisper-cli -j 4
+          cp dl/whisper.cpp/build/bin/whisper-cli bin/whisper/
+          chmod +x bin/ffmpeg bin/ffprobe bin/yt-dlp bin/whisper/whisper-cli
+          # every arm64 binary must be signed (ad-hoc is enough) to run
+          for f in bin/ffmpeg bin/ffprobe bin/yt-dlp bin/whisper/whisper-cli; do codesign --force -s - "$f"; done
+          # sanity checks: the filters Clipwave needs, and that the tools start
+          ./bin/ffmpeg -hide_banner -filters | grep -E " (ass|zoompan|gblur|ebur128) "
+          ./bin/ffprobe -version | head -1
+          ./bin/yt-dlp --version
+          ./bin/whisper/whisper-cli --help > /dev/null 2>&1 || ./bin/whisper/whisper-cli -h | head -2
+
+      - run: npm ci
+
+      - name: Build app + dmg
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -euo pipefail
+          EXTRA=""
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "No updater key secret – building without auto-update files."
+            echo '{"bundle":{"createUpdaterArtifacts":false}}' > nosign.json
+            EXTRA="--config nosign.json"
+          fi
+          npx tauri build --bundles app,dmg $EXTRA
+
+      - name: Attach to the release
+        run: |
+          set -euo pipefail
+          V="${TAG#v}"
+          B=src-tauri/target/release/bundle
+          cp "$(ls $B/dmg/*.dmg | head -1)" "Clipwave-$V-mac-arm64.dmg"
+          gh release upload "$TAG" "Clipwave-$V-mac-arm64.dmg" --clobber
+          SIG="$B/macos/Clipwave.app.tar.gz.sig"
+          if [ -f "$SIG" ]; then
+            cp "$B/macos/Clipwave.app.tar.gz" "Clipwave-$V-mac-arm64.app.tar.gz"
+            gh release upload "$TAG" "Clipwave-$V-mac-arm64.app.tar.gz" --clobber
+            gh release download "$TAG" -p latest.json --clobber
+            node -e '
+              const fs = require("fs");
+              const j = JSON.parse(fs.readFileSync("latest.json", "utf8"));
+              j.platforms["darwin-aarch64"] = { signature: fs.readFileSync(process.argv[1], "utf8").trim(), url: process.argv[2] };
+              fs.writeFileSync("latest.json", JSON.stringify(j, null, 2));
+            ' "$SIG" "https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/Clipwave-$V-mac-arm64.app.tar.gz"
+            gh release upload "$TAG" latest.json --clobber
+          fi

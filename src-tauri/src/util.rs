@@ -23,7 +23,7 @@ pub fn bin_dir(app: &AppHandle) -> PathBuf {
     }
     if let Ok(r) = app.path().resource_dir() {
         let b = r.join("bin");
-        if b.join("ffmpeg.exe").exists() {
+        if b.join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)).exists() {
             return b;
         }
     }
@@ -31,18 +31,26 @@ pub fn bin_dir(app: &AppHandle) -> PathBuf {
 }
 pub fn tool(app: &AppHandle, name: &str) -> PathBuf {
     let b = bin_dir(app);
+    let exe = std::env::consts::EXE_SUFFIX;
     match name {
-        "whisper" => b.join("whisper").join("Release").join("whisper-cli.exe"),
-        n => b.join(format!("{n}.exe")),
+        // Windows ships the MSVC build folder, macOS a single static binary
+        "whisper" if cfg!(windows) => b.join("whisper").join("Release").join("whisper-cli.exe"),
+        "whisper" => b.join("whisper").join("whisper-cli"),
+        n => b.join(format!("{n}{exe}")),
     }
 }
 
-/// %APPDATA%\Clipwave – the same folder the Electron versions used, so projects carry over unchanged.
+/// Windows: %APPDATA%\Clipwave (same folder as the Electron versions, so projects carry over).
+/// macOS: ~/Library/Application Support/Clipwave.
 pub fn user_dir() -> PathBuf {
     if let Ok(d) = std::env::var("CW_DATA") {
         return d.into();
     }
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("Clipwave")
+    if cfg!(windows) {
+        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("Clipwave")
+    } else {
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join("Library").join("Application Support").join("Clipwave")
+    }
 }
 pub fn sub_dir(name: &str) -> PathBuf {
     let d = user_dir().join(name);
@@ -97,11 +105,18 @@ static PIDS: LazyLock<Mutex<HashSet<u32>>> = LazyLock::new(|| Mutex::new(HashSet
 pub fn kill_all() {
     let pids: Vec<u32> = PIDS.lock().unwrap().iter().copied().collect();
     for pid in pids {
-        let mut c = Command::new("taskkill");
-        c.args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null());
-        #[cfg(windows)]
-        c.creation_flags(CREATE_NO_WINDOW);
-        let _ = c.status();
+        let p = pid.to_string();
+        if cfg!(windows) {
+            let mut c = Command::new("taskkill");
+            c.args(["/PID", &p, "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null());
+            #[cfg(windows)]
+            c.creation_flags(CREATE_NO_WINDOW);
+            let _ = c.status();
+        } else {
+            // children first (e.g. ffmpeg started by yt-dlp), then the tool itself
+            let _ = Command::new("pkill").args(["-9", "-P", &p]).status();
+            let _ = Command::new("kill").args(["-9", &p]).status();
+        }
     }
 }
 

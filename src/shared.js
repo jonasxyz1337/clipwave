@@ -16,6 +16,14 @@
     'Segoe UI Semibold': ['seguisb.ttf'],
   };
 
+  // the same fonts on macOS (file names differ). Segoe UI / Bahnschrift do not exist there: Arial / Helvetica stand in.
+  const FONTS_MAC = {
+    'Impact': ['Impact.ttf'], 'Arial Black': ['Arial Black.ttf'], 'Bahnschrift': ['Arial.ttf', 'Arial Bold.ttf'],
+    'Segoe UI': ['Arial.ttf', 'Arial Bold.ttf'], 'Segoe UI Black': ['Arial Black.ttf'], 'Segoe UI Semibold': ['Arial Bold.ttf'],
+    'Trebuchet MS': ['Trebuchet MS.ttf', 'Trebuchet MS Bold.ttf'], 'Verdana': ['Verdana.ttf', 'Verdana Bold.ttf'],
+    'Georgia': ['Georgia.ttf', 'Georgia Bold.ttf'], 'Comic Sans MS': ['Comic Sans MS.ttf', 'Comic Sans MS Bold.ttf'], 'Arial': ['Arial.ttf', 'Arial Bold.ttf'],
+  };
+
   const SUB_PRESETS = {
     'TikTok Box': { font: 'Segoe UI Semibold', size: 62, bold: false, uppercase: false, color: '#111111', hiColor: '#111111', impColor: '#111111', outlineColor: '#ffffff', outline: 0, shadow: 0, shadowColor: '#000000', mode: 'static', maxWords: 5, y: 0.72, scale: 100, box: true, boxColor: '#ffffff' },
     'Impact Pop': { font: 'Impact', size: 96, bold: false, uppercase: true, color: '#ffffff', hiColor: '#ffe14d', impColor: '#ff5ce1', outlineColor: '#000000', outline: 7, shadow: 3, shadowColor: '#000000', mode: 'highlight', maxWords: 3, y: 0.7, scale: 112 },
@@ -319,6 +327,6 @@
     return L.join('\n') + '\n';
   }
 
-  const api = { camZoomRect, camZoomAt, camZoomGraph, subBoxLines, textW, DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
+  const api = { FONTS_MAC, camZoomRect, camZoomAt, camZoomGraph, subBoxLines, textW, DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else g.Shared = api;
 })(typeof window !== 'undefined' ? window : globalThis);
