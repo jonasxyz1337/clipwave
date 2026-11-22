@@ -75,7 +75,9 @@
       g.push(`[${gfxBase + i}:v]setpts=PTS-STARTPTS+${S}/TB,format=rgba[gf${i}]`, `[${gcur}][gf${i}]overlay=0:0:eof_action=pass:enable='between(t\\,${S}\\,${E})'[gv${i}]`);
       gcur = `gv${i}`;
     });
-    g.push(`[${gcur}]format=yuv420p${od ? `,fps=${fps},setsar=1` : ''}[va]`);
+    // headline is its own layer: added after the hook teaser is cut, so the teaser shows no headline
+    const headIn = hk ? '' : 'ass=head.ass:fontsdir=fonts,';
+    g.push(`[${gcur}]${headIn}format=yuv420p${od ? `,fps=${fps},setsar=1` : ''}[va]`);
 
     // hook: teaser = a piece of the finished clip (captions included) with a label, then a white flash into the clip
     let vcur = 'va';
@@ -84,7 +86,7 @@
       const hs = hk.start.toFixed(3), L = hl.toFixed(3);
       const flashOut = hk.flash ? `,fade=t=out:st=${Math.max(0, hl - 0.12).toFixed(3)}:d=0.12:color=white` : '';
       const flashIn = hk.flash ? 'fade=t=in:st=0:d=0.25:color=white' : 'null';
-      g.push(`[va]split[vmain][vh0]`, `[vh0]trim=start=${hs}:duration=${L},setpts=PTS-STARTPTS,ass=hook.ass:fontsdir=fonts${flashOut}[vh]`, `[vmain]${flashIn}[vm]`, '[vh][vm]concat=n=2:v=1:a=0[vhk]');
+      g.push(`[va]split[vmain][vh0]`, `[vh0]trim=start=${hs}:duration=${L},setpts=PTS-STARTPTS,ass=hook.ass:fontsdir=fonts${flashOut}[vh]`, `[vmain]ass=head.ass:fontsdir=fonts,${flashIn}[vm]`, '[vh][vm]concat=n=2:v=1:a=0[vhk]');
       vcur = 'vhk';
     }
 
@@ -147,7 +149,7 @@
     [sub.font, head.font, 'Bahnschrift', Shared.HOOK_STYLE.font].forEach((f) => (Shared.FONTS[f] || []).forEach((x) => fonts.add(x)));
     return {
       jobId: job.jobId, out: job.out, total: hl + dur + od, fonts: [...fonts],
-      files: { ...files, 'subs.ass': Shared.buildAss({ words, dur, sub, head, showSubs: job.subsOn, showHead: job.headOn }) },
+      files: { ...files, 'subs.ass': Shared.buildAss({ words, dur, sub, head, showSubs: job.subsOn, showHead: false }), 'head.ass': Shared.buildAss({ words: [], dur, sub, head, showSubs: false, showHead: job.headOn }) },
       variants: tries.map((t) => [...base, ...enc[t], ...tail]),
     };
   }

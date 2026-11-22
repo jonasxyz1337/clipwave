@@ -201,7 +201,7 @@ function drawComposite(ctx, clip, v, t) {
     applyFxPreview(ctx, k, clip, t);
   }
   if (clip.subsOn) drawSubs(ctx, k, clip, t);
-  if (clip.headOn) drawHead(ctx, k, clip, t);
+  if (clip.headOn && !(T.hookPlay && T.hookPlay.clip === clip && T.hookPlay.phase === 'hook')) drawHead(ctx, k, clip, t); // no headline during the hook teaser
   Gfx.drawAll(ctx, k, clip.gfx, t);
   drawHookPreview(ctx, k, clip, t);
 }
