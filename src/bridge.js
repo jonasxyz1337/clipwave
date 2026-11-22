@@ -139,7 +139,8 @@
 
     gfxSegs.forEach((gs) => extraIn.push('-i', gs.path));
     const base = ['-y', '-hide_banner', '-ss', String(job.start), '-t', String(dur), '-i', job.videoPath, ...extraIn, '-filter_complex', g.join(';'), '-map', vmap, '-map', amap];
-    const tail = [...(job.fps && !od ? ['-r', String(job.fps)] : []), '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', job.out];
+    // always 4:2:0 – filters like fade/ass after the hook split can otherwise make x264 pick 4:4:4, which Windows/phones can't play
+    const tail = [...(job.fps && !od ? ['-r', String(job.fps)] : []), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', job.out];
     const enc = {
       nvenc: ['-c:v', 'h264_nvenc', '-preset', 'p5', '-cq', String(job.crf), '-b:v', '0'],
       x264: ['-c:v', 'libx264', '-preset', job.preset, '-crf', String(job.crf), '-threads', String(job.threads || 0)],
