@@ -214,6 +214,26 @@
     return { graph: parts.join(';'), out: cur };
   }
 
+  // ---------- hook: a short teaser of the clip's highlight, played before the clip starts ----------
+  const DEFAULT_HOOK = { on: false, start: 0, len: 2.5, text: '', flash: true };
+  const HOOK_STYLE = { font: 'Bahnschrift', size: 104, y: 0.42, color: '#ffffff', outline: '#ff4fd8' };
+  // the teaser window inside the clip (clip-relative seconds), or null when the hook is off
+  function hookWindow(hk, clipDur) {
+    if (!hk || !hk.on || clipDur < 2) return null;
+    const len = clamp(Math.round((hk.len || 2.5) * 10) / 10, 1, Math.min(5, clipDur - 0.5));
+    return { start: clamp(hk.start || 0, 0, clipDur - len), len };
+  }
+  // label shown over the teaser ("WAIT FOR IT…"): pops in, then pulses gently
+  function buildHookAss(hk, len) {
+    const st = HOOK_STYLE, txt = esc((hk.text || '').trim());
+    const L = ['[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${W}`, `PlayResY: ${H}`, 'WrapStyle: 0', 'ScaledBorderAndShadow: yes', '',
+      '[V4+ Styles]', 'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
+      `Style: Hook,${st.font},${st.size},${ac(st.color)},${ac(st.color)},${ac(st.outline)},${ac('#000000', 90)},-1,0,0,0,100,100,2,0,1,9,5,5,60,60,40,1`, '',
+      '[Events]', 'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text'];
+    if (txt) L.push(`Dialogue: 1,${ts(0)},${ts(len)},Hook,,0,0,0,,{\\an5\\pos(${W / 2},${Math.round(st.y * H)})\\fscx40\\fscy40\\t(0,180,\\fscx112\\fscy112)\\t(180,300,\\fscx100\\fscy100)\\t(600,${Math.round(len * 1000)},\\fscx108\\fscy108)}${txt}`);
+    return L.join('\n') + '\n';
+  }
+
   // ---------- outro ----------
   const DEFAULT_OUTRO = { on: false, mode: 'pad', seconds: 4, title: 'CLIPWAVE', sub: 'Follow for more' };
   // pad = fill the video up to one minute (3..30 s outro); fixed = exact seconds
@@ -252,6 +272,6 @@
     return L.join('\n') + '\n';
   }
 
-  const api = { cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
+  const api = { DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else g.Shared = api;
 })(typeof window !== 'undefined' ? window : globalThis);

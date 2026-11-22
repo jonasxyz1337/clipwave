@@ -37,6 +37,7 @@ pub fn run() {
             media::video_url,
             media::video_file,
             media::video_path,
+            media::find_highlight,
             stt::transcribe,
             stt::eleven_connect,
             stt::eleven_stop,

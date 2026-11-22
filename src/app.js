@@ -58,7 +58,7 @@ function confirmDlg(title, text, ok = 'Delete') {
 const DEF = { lang: 'auto', outDir: '', quality: 'high', fps: 'source', encoder: 'x264', speed: 'veryfast', threads: 0, accent: 'Magenta', motion: true, palms: true, uiScale: 100, autoTranscribe: false, model: 'small', engine: 'auto', elKey: '', subPreset: 'Impact Pop', filename: '{title}_clip{n}', openWhenDone: false };
 const S = { videos: [], clips: [], history: [], presets: { sub: {}, head: {} }, settings: { ...DEF }, selVideo: null, selClip: null, tab: 'home' };
 const T = { audios: {}, fxSel: null, sndSel: null, row: 0, busy: {}, jobs: {}, importing: null, urlText: '', range: { start: 0, end: 10 }, view: null, exporting: false, env: {}, sel: {} };
-const TABS = [['home', 'Home'], ['editor', 'Clip Editor'], ['subtitles', 'Subtitles'], ['layout', 'Layout'], ['headlines', 'Headlines'], ['effects', 'Effects'], ['sounds', 'Sounds'], ['export', 'Export'], ['settings', 'Settings']];
+const TABS = [['home', 'Home'], ['editor', 'Clip Editor'], ['hook', 'Hook'], ['subtitles', 'Subtitles'], ['layout', 'Layout'], ['headlines', 'Headlines'], ['effects', 'Effects'], ['sounds', 'Sounds'], ['export', 'Export'], ['settings', 'Settings']];
 const LANGS = [['auto', 'Auto-detect'], ['en', 'English'], ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'], ['it', 'Italiano'], ['pt', 'Português'], ['nl', 'Nederlands'], ['pl', 'Polski'], ['tr', 'Türkçe'], ['ru', 'Русский'], ['ja', '日本語']];
 const ACCENTS = { Magenta: ['#b955bd', '#6b2c93', '#3c1458'], Violet: ['#8b62dc', '#47309a', '#22134f'], 'Ultra Blue': ['#6478e8', '#3238a0', '#16185a'], Rose: ['#e0559f', '#80256f', '#40103f'] };
 const QUALITY = { draft: ['Draft', 24], standard: ['Standard', 20], high: ['High', 17], max: ['Maximum', 14] };
@@ -188,11 +188,34 @@ function drawComposite(ctx, clip, v, t) {
   }
   if (clip.subsOn) drawSubs(ctx, k, clip, t);
   if (clip.headOn) drawHead(ctx, k, clip, t);
+  drawHookPreview(ctx, k, clip, t);
+}
+function drawHookPreview(ctx, k, clip, t) {
+  const hp = T.hookPlay; if (!hp || hp.clip !== clip) return;
+  if (hp.phase === 'hook') {
+    const txt = (clip.hook.text || '').trim(), st = Shared.HOOK_STYLE, age = t - hp.from;
+    if (txt) {
+      const sc = age < 0.18 ? 0.4 + (1.12 - 0.4) * (age / 0.18) : age < 0.3 ? 1.12 - 0.12 * ((age - 0.18) / 0.12) : 1 + 0.08 * clamp((age - 0.6) / Math.max(0.1, hp.len - 0.6), 0, 1);
+      ctx.font = `bold ${st.size * 0.86 * k}px "${st.font}", sans-serif`; ctx.textBaseline = 'middle';
+      drawText(ctx, txt, ctx.canvas.width / 2, st.y * 1920 * k, st.color, {}, k, sc, 'rgba(0,0,0,.6)', 5, st.outline, 9);
+    }
+    if (clip.hook.flash) { const a = clamp((age - (hp.len - 0.12)) / 0.12, 0, 1); if (a > 0) { ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); } }
+  } else if (clip.hook.flash) {
+    const a = 1 - clamp((performance.now() - hp.flashAt) / 250, 0, 1); if (a > 0) { ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); }
+  }
+}
+function previewHook(c) {
+  const w = Shared.hookWindow(c.hook, c.end - c.start); if (!w) return toast('Turn the hook on first.', true);
+  V.currentTime = c.start + w.start; T.hookPlay = { clip: c, phase: 'hook', from: w.start, len: w.len, until: c.start + w.start + w.len }; V.play(); stageDirty = true;
 }
 function frame() {
   const c = T.stageClip;
   if (Stage.cv && c && Stage.el.isConnected) {
     const v = vidOf(c);
+    const hp = T.hookPlay;
+    if (hp && (V.paused || hp.clip !== c)) T.hookPlay = null;
+    else if (hp && hp.phase === 'hook' && V.currentTime >= hp.until) { V.currentTime = c.start; hp.phase = 'main'; hp.flashAt = performance.now(); }
+    if (hp && hp.phase === 'main' && performance.now() - hp.flashAt > 400) T.hookPlay = null;
     if (!V.paused && V.currentTime >= c.end - 0.03) { V.currentTime = c.start; }
     if (!V.paused || stageDirty) {
       drawComposite(Stage.ctx, c, v, V.currentTime - c.start); stageDirty = false;
@@ -348,7 +371,7 @@ function addClip() {
   const sub = clone(base ? base.sub : SUB_PRESETS[S.settings.subPreset] ? { ...SUB_PRESETS[S.settings.subPreset], preset: S.settings.subPreset } : { ...SUB_PRESETS['Impact Pop'], preset: 'Impact Pop' });
   const head = clone(base ? { ...base.head, text: '' } : { ...HEAD_PRESETS['Bold Statement'], text: '' });
   const n = S.clips.filter((c) => c.videoId === v.id).length + 1;
-  const c = { id: uid(), videoId: v.id, name: `Clip ${n}`, start: T.range.start, end: T.range.end, words: null, subsOn: true, headOn: true, layout: clone(base ? base.layout : DEFAULT_LAYOUT), sub, head, outro: clone(base && base.outro ? base.outro : Shared.DEFAULT_OUTRO), fx: [], sounds: [], origVol: 1 };
+  const c = { id: uid(), videoId: v.id, name: `Clip ${n}`, start: T.range.start, end: T.range.end, words: null, subsOn: true, headOn: true, layout: clone(base ? base.layout : DEFAULT_LAYOUT), sub, head, outro: clone(base && base.outro ? base.outro : Shared.DEFAULT_OUTRO), fx: [], sounds: [], origVol: 1, hook: clone(Shared.DEFAULT_HOOK) };
   S.clips.unshift(c); S.selClip = c.id; save(); toast(`${c.name} added (${fmt(c.end - c.start)}s).`);
   if (S.settings.autoTranscribe) transcribeClip(c);
   render(true);
@@ -529,6 +552,33 @@ function srcMap(c) {
   return h('div', {}, h('div', { class: 'cap' }, 'Source map'), map, h('div', { class: 'pdesc', style: 'font-size:12px', html: 'White: gameplay crop.<br><b>Pink: facecam – drag to move.</b>' }));
 }
 
+
+// ---------- HOOK ----------
+function pageHook() {
+  const c = curClip(); if (!c) return needClipItems('Create a clip first, then add a hook – a short teaser of its best moment that plays before the clip.');
+  c.hook = c.hook || clone(Shared.DEFAULT_HOOK); const hk = c.hook, dur = c.end - c.start, L = [];
+  const win = () => Shared.hookWindow({ ...hk, on: true }, dur) || { start: 0, len: 1 };
+  L.push(sec('Hook – teaser at the start'));
+  L.push(toggleRow('Hook', () => hk.on, (v) => (hk.on = v), { rebuild: true, desc: 'Puts a short segment of the clip (the highlight) in front of it, so viewers stay to see how it happens. Then the clip plays normally from the beginning. Pick the segment below or let Clipwave find it.' }));
+  L.push(actionRow('Find highlight automatically', async () => {
+    const v = vidOf(c); if (!v) return;
+    try {
+      toast('Looking for the loudest moment…');
+      const r = await api.findHighlight({ videoPath: v.path, start: c.start, end: c.end, len: win().len });
+      hk.start = r.start; hk.on = true; save(); V.currentTime = c.start + r.start; stageDirty = true; render(true);
+      toast(`Highlight found at ${fmt(r.start)} s. Press “Preview with hook”.`);
+    } catch (e) { toast(e.message, true); }
+  }, { desc: 'Picks the loudest, most intense moment of the clip (screams, hype, explosions). You can fine-tune it below.' }));
+  L.push(actionRow('▶ Preview with hook', () => previewHook(c), { desc: 'Plays the teaser, then the clip from the start – like viewers will see it.' }));
+  L.push(sec('Teaser'));
+  L.push(rangeRow('Highlight starts at', () => win().start, (v) => (hk.start = v), 0, Math.max(0.1, dur - 1), 0.1, (v) => fmt(v) + ' s', { rebuild: true, desc: 'Which moment of the clip is shown as the teaser (seconds from the clip start).' }));
+  L.push(actionRow('Start = playhead', () => { hk.start = clamp(V.currentTime - c.start, 0, dur); save(); render(true); }, { desc: 'Scrub the preview to the moment, then click to use it as the teaser.' }));
+  L.push(rangeRow('Length', () => win().len, (v) => (hk.len = v), 1, 5, 0.5, (v) => v.toFixed(1) + ' s', { rebuild: true, desc: 'Short is best: 2–3 seconds make people curious without giving everything away.' }));
+  L.push({ type: 'text', label: 'Text', placeholder: 'e.g. WAIT FOR IT…', get: () => hk.text, set: (v) => { hk.text = v; stageDirty = true; save(); }, desc: 'Optional text on screen during the teaser (e.g. WAIT FOR IT…). Empty = only the video segment.' });
+  L.push(toggleRow('Flash transition', () => hk.flash, (v) => (hk.flash = v), { desc: 'Quick white flash between teaser and clip.' }));
+  return L;
+}
+
 // ---------- HEADLINES ----------
 function pageHeads() {
   const c = curClip(); if (!c) return needClipItems('Create a clip first, then add a headline here.');
@@ -661,7 +711,7 @@ function pageExport() {
       if (ou().mode === 'fixed') L.push(rangeRow('Seconds', () => ou().seconds, (v) => (ou().seconds = v), 2, 30, 1, (v) => v + ' s', { rebuild: true }));
       L.push({ type: 'text', label: 'Outro title', placeholder: 'CLIPWAVE', get: () => ou().title, set: (v) => (ou().title = v) });
       L.push({ type: 'text', label: 'Outro tagline', placeholder: 'Follow for more', get: () => ou().sub, set: (v) => (ou().sub = v) });
-      const clipLen = oc.end - oc.start, od = Shared.outroDuration(ou(), clipLen);
+      const clipLen = oc.end - oc.start + ((Shared.hookWindow(oc.hook, oc.end - oc.start) || {}).len || 0), od = Shared.outroDuration(ou(), clipLen); // clipLen includes the hook teaser
       L.push({ type: 'custom', node: h('div', { class: 'empty' }, `Clip ${fmt(clipLen, 0)}s + outro ${od.toFixed(1)}s = ${fmt(clipLen + od, 0)} total` + (ou().mode === 'pad' && clipLen + od < 59.5 ? ' – clip is too short to reach 1:00 (outro is capped at 30 s).' : '')) });
       L.push(actionRow('Apply outro to all clips', () => { S.clips.forEach((x) => (x.outro = clone(ou()))); save(); toast('Outro applied to all clips.'); }));
     }
@@ -700,7 +750,7 @@ async function runExport(clips) {
       const base = S.settings.filename.replace('{title}', v.title).replace('{n}', String(S.clips.filter((x) => x.videoId === c.videoId).reverse().indexOf(c) + 1)).replace('{name}', c.name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 80) || 'clip';
       let out = `${dir}\\${base}.mp4`, k = 2; while (await api.exists(out)) out = `${dir}\\${base}_${k++}.mp4`;
       const jobId = uid(); T.jobs[jobId] = { clipId: c.id, pct: 0, name: c.name };
-      jobs.push({ jobId, videoPath: v.path, w: v.w, h: v.h, start: c.start, end: c.end, words: c.words || [], sub: c.sub, head: c.head, layout: c.layout, subsOn: c.subsOn, headOn: c.headOn, out, crf, preset: S.settings.speed, fps: S.settings.fps === 'source' ? (c.outro && c.outro.on ? Math.min(60, Math.round(v.fps || 30)) : 0) : Number(S.settings.fps), encoder: S.settings.encoder, threads: S.settings.threads, fx: c.fx || [], sounds: c.sounds || [], origVol: c.origVol == null ? 1 : c.origVol, outro: c.outro || null, outroDur: Shared.outroDuration(c.outro, c.end - c.start), hasAudio: v.hasAudio !== false });
+      jobs.push({ jobId, videoPath: v.path, w: v.w, h: v.h, start: c.start, end: c.end, words: c.words || [], sub: c.sub, head: c.head, layout: c.layout, subsOn: c.subsOn, headOn: c.headOn, out, crf, preset: S.settings.speed, fps: S.settings.fps === 'source' ? (c.outro && c.outro.on ? Math.min(60, Math.round(v.fps || 30)) : 0) : Number(S.settings.fps), encoder: S.settings.encoder, threads: S.settings.threads, fx: c.fx || [], sounds: c.sounds || [], origVol: c.origVol == null ? 1 : c.origVol, hook: Shared.hookWindow(c.hook, c.end - c.start) ? { ...c.hook, ...Shared.hookWindow(c.hook, c.end - c.start) } : null, outro: c.outro || null, outroDur: Shared.outroDuration(c.outro, c.end - c.start + ((Shared.hookWindow(c.hook, c.end - c.start) || {}).len || 0)), hasAudio: v.hasAudio !== false });
     }
     if (jobs.length) { toast(`Rendering ${jobs.length} clip(s) in the background…`); await api.exportBatch(jobs); const ok = jobs.filter((j) => T.jobs[j.jobId]?.done && !T.jobs[j.jobId].error).length; toast(`Export finished: ${ok} of ${jobs.length} succeeded.`, ok < jobs.length); }
   } catch (e) { toast(e.message, true); }
@@ -784,13 +834,13 @@ function onUpdate(u) {
 }
 
 // ================= engine =================
-const PAGE = { home: [pages.home, rightHome], editor: [pageEditor, null], subtitles: [pageSubs, null], layout: [pageLayout, null], headlines: [pageHeads, null], effects: [pageEffects, null], sounds: [pageSounds, null], export: [pageExport, null], settings: [pageSettings, null] };
+const PAGE = { home: [pages.home, rightHome], editor: [pageEditor, null], hook: [pageHook, null], subtitles: [pageSubs, null], layout: [pageLayout, null], headlines: [pageHeads, null], effects: [pageEffects, null], sounds: [pageSounds, null], export: [pageExport, null], settings: [pageSettings, null] };
 function rightFor(it) {
   const t = S.tab;
   if (t === 'home') return rightHome(it);
   if (t === 'editor') return rightEditor();
   if (t === 'export') return rightExport(it);
-  if (t === 'subtitles' || t === 'headlines' || t === 'sounds') return rightStage(it);
+  if (t === 'subtitles' || t === 'headlines' || t === 'sounds' || t === 'hook') return rightStage(it);
   if (t === 'effects') return curClip() ? rightStage(it, null) : h('div');
   if (t === 'layout') return curClip() ? rightStage(it, () => srcMap(curClip())) : h('div');
   const p = h('div', {}, h('div', { class: 'ptitle' }, it ? it.label : 'Settings'));
@@ -798,7 +848,7 @@ function rightFor(it) {
 }
 function renderRight() {
   const it = items[T.row]; const r = $('#right');
-  if (!['editor', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) { T.stageClip = null; }
+  if (!['editor', 'hook', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) { T.stageClip = null; }
   const node = rightFor(it && it.type !== 'sec' ? it : null);
   if (node && !(it && it.desc == null && S.tab === 'settings')) r.replaceChildren(node);
   if (it && it.desc && ['home', 'editor'].includes(S.tab) && it.type !== 'video' && it.type !== 'clip' && node) node.append(h('div', { class: 'pdesc', html: it.desc }));
@@ -883,7 +933,7 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('dragover', (e) => e.preventDefault());
 api.onDrop(async (p) => { if (!/\.(mp4|mkv|mov|webm|avi|m4v)$/i.test(p)) return toast('That is not a supported video file.', true); try { addVideo(await api.importPath(p)); } catch (x) { toast(x.message, true); } });
-addEventListener('resize', () => { Stage.cv = null; if (['editor', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) renderRight(); });
+addEventListener('resize', () => { Stage.cv = null; if (['editor', 'hook', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) renderRight(); });
 window.onerror = (m) => toast('Unexpected error: ' + m, true);
 addEventListener('unhandledrejection', (e) => toast('Error: ' + (e.reason?.message || e.reason), true));
 

@@ -30,13 +30,13 @@
 
   async function buildSpec(job, seg) {
     const { sub, head, layout, words } = job;
-    const dur = job.end - job.start, od = job.outroDur || 0;
+    const dur = job.end - job.start, od = job.outroDur || 0, hk = job.hook, hl = hk ? hk.len : 0;
     const fps = job.fps || 30, d3 = dur.toFixed(3);
     const sounds = [];
     for (const x of job.sounds || []) if (x && x.path && (await inv('fs_exists', { path: x.path }))) sounds.push(x);
     const origVol = job.origVol == null ? 1 : job.origVol;
     const g = [], extraIn = [];
-    let outroTxt = null;
+    const files = {};
 
     // video: layout -> timed effect boxes -> captions
     const fx = Shared.fxGraph(job.fx || [], 'vc');
@@ -44,15 +44,26 @@
     if (fx.graph) g.push(fx.graph);
     g.push(`[${fx.out}]ass=subs.ass:fontsdir=fonts,format=yuv420p${od ? `,fps=${fps},setsar=1` : ''}[va]`);
 
+    // hook: teaser = a piece of the finished clip (captions included) with a label, then a white flash into the clip
+    let vcur = 'va';
+    if (hk) {
+      files['hook.ass'] = Shared.buildHookAss(hk, hl);
+      const hs = hk.start.toFixed(3), L = hl.toFixed(3);
+      const flashOut = hk.flash ? `,fade=t=out:st=${Math.max(0, hl - 0.12).toFixed(3)}:d=0.12:color=white` : '';
+      const flashIn = hk.flash ? 'fade=t=in:st=0:d=0.25:color=white' : 'null';
+      g.push(`[va]split[vmain][vh0]`, `[vh0]trim=start=${hs}:duration=${L},setpts=PTS-STARTPTS,ass=hook.ass:fontsdir=fonts${flashOut}[vh]`, `[vmain]${flashIn}[vm]`, '[vh][vm]concat=n=2:v=1:a=0[vhk]');
+      vcur = 'vhk';
+    }
+
     // outro (video + its own audio)
-    let outroAudio = [], vmap = '[va]', nextIn = 1;
+    let outroAudio = [], vmap = `[${vcur}]`, nextIn = 1;
     if (od) {
       const loops = Math.max(1, Math.ceil((od - 2.5) / 3.5) + 1);
-      outroTxt = [`file '${fwd(seg.intro)}'`, ...Array.from({ length: loops }, () => `file '${fwd(seg.loop)}'`)].join('\n');
+      files['outro.txt'] = [`file '${fwd(seg.intro)}'`, ...Array.from({ length: loops }, () => `file '${fwd(seg.loop)}'`)].join('\n');
       const D = od.toFixed(2), t0 = Math.max(0, od - 0.45).toFixed(2), hasVoice = !!seg.voice;
       extraIn.push('-t', D, '-f', 'concat', '-safe', '0', '-i', 'outro.txt'); nextIn = 2;
       if (hasVoice) { extraIn.push('-i', seg.voice); nextIn = 3; }
-      g.push(`[1:v]trim=duration=${D},setpts=PTS-STARTPTS,fps=${fps},fade=t=out:st=${t0}:d=0.45,format=yuv420p,setsar=1[vb]`, '[va][vb]concat=n=2:v=1:a=0[v]');
+      g.push(`[1:v]trim=duration=${D},setpts=PTS-STARTPTS,fps=${fps},fade=t=out:st=${t0}:d=0.45,format=yuv420p,setsar=1[vb]`, `[${vcur}][vb]concat=n=2:v=1:a=0[v]`);
       vmap = '[v]';
       outroAudio = [
         `anoisesrc=d=1.1:c=pink:a=0.5,highpass=f=350,lowpass=f=5000,afade=t=in:st=0:d=0.9,afade=t=out:st=0.9:d=0.2,volume=0.16,${fmtA}[w]`,
@@ -66,7 +77,7 @@
 
     // audio: original track + user sounds (trimmed, timed, faded)
     let amap;
-    if (!(od || sounds.length || origVol !== 1)) amap = '0:a:0?';
+    if (!(od || hk || sounds.length || origVol !== 1)) amap = '0:a:0?';
     else {
       g.push(job.hasAudio
         ? `[0:a:0]aresample=48000,aformat=channel_layouts=stereo,volume=${origVol},apad=whole_dur=${d3},atrim=duration=${d3},asetpts=N/SR/TB[a0]`
@@ -83,6 +94,10 @@
         g.push(`[a0]${sounds.map((_, i) => `[sd${i}]`).join('')}amix=inputs=${sounds.length + 1}:duration=first:normalize=0,alimiter=limit=0.97[am]`);
         aOut = 'am';
       }
+      if (hk) {
+        g.push(`[${aOut}]asplit[amain][ah0]`, `[ah0]atrim=start=${hk.start.toFixed(3)}:duration=${hl.toFixed(3)},asetpts=N/SR/TB[ah]`, '[ah][amain]concat=n=2:v=0:a=1[ahk]');
+        aOut = 'ahk';
+      }
       if (od) { g.push(...outroAudio, `[${aOut}][ao]concat=n=2:v=0:a=1[a]`); amap = '[a]'; }
       else amap = `[${aOut}]`;
     }
@@ -95,10 +110,10 @@
     };
     const tries = job.encoder === 'nvenc' ? ['nvenc', 'x264'] : ['x264'];
     const fonts = new Set(['arial.ttf', 'arialbd.ttf']);
-    [sub.font, head.font, 'Bahnschrift'].forEach((f) => (Shared.FONTS[f] || []).forEach((x) => fonts.add(x)));
+    [sub.font, head.font, 'Bahnschrift', Shared.HOOK_STYLE.font].forEach((f) => (Shared.FONTS[f] || []).forEach((x) => fonts.add(x)));
     return {
-      jobId: job.jobId, out: job.out, total: dur + od, fonts: [...fonts], outroTxt,
-      ass: Shared.buildAss({ words, dur, sub, head, showSubs: job.subsOn, showHead: job.headOn }),
+      jobId: job.jobId, out: job.out, total: hl + dur + od, fonts: [...fonts],
+      files: { ...files, 'subs.ass': Shared.buildAss({ words, dur, sub, head, showSubs: job.subsOn, showHead: job.headOn }) },
       variants: tries.map((t) => [...base, ...enc[t], ...tail]),
     };
   }
@@ -152,6 +167,7 @@
     updateInstall: () => inv('update_install'),
     updateState: () => inv('update_state'),
     pickSound: () => inv('sound_pick'),
+    findHighlight: (req) => inv('find_highlight', { req }),
     fileUrl: (p) => TA.core.convertFileSrc(p),
     onDrop: (cb) => { dropCb = cb; },
     onEvent: (cb) => listeners.push(cb),

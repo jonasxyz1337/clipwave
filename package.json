@@ -1,6 +1,6 @@
 {
   "name": "clipwave",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Clipwave \u2013 vertical clips with subtitles from YouTube & Twitch",
   "scripts": {

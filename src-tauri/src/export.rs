@@ -20,10 +20,8 @@ static PROGRESS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^out_time_(?:us
 #[serde(rename_all = "camelCase")]
 pub struct Spec {
     job_id: String,
-    /// ASS captions/headline file content
-    ass: String,
-    /// concat list for the outro, if any
-    outro_txt: Option<String>,
+    /// small text files the graph reads, by plain file name (captions .ass, outro concat list, …)
+    files: std::collections::HashMap<String, String>,
     /// font file names to copy from C:\Windows\Fonts for libass
     fonts: Vec<String>,
     /// ffmpeg argument lists to try in order (e.g. NVENC first, then x264)
@@ -41,9 +39,13 @@ fn export_one_blocking(app: &AppHandle, sp: Spec) -> Res<u64> {
     for f in &sp.fonts {
         let _ = std::fs::copy(win_fonts.join(f), fdir.join(f));
     }
-    std::fs::write(tmp.path().join("subs.ass"), format!("\u{feff}{}", sp.ass)).map_err(|e| e.to_string())?;
-    if let Some(t) = &sp.outro_txt {
-        std::fs::write(tmp.path().join("outro.txt"), t).map_err(|e| e.to_string())?;
+    for (name, content) in &sp.files {
+        // only plain file names, written inside our own temp folder
+        if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') {
+            return Err(format!("invalid file name in export job: {name}"));
+        }
+        let bom = if name.ends_with(".ass") { "\u{feff}" } else { "" };
+        std::fs::write(tmp.path().join(name), format!("{bom}{content}")).map_err(|e| e.to_string())?;
     }
     let out = PathBuf::from(&sp.out);
     if let Some(d) = out.parent() {

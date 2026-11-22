@@ -150,3 +150,78 @@ pub async fn video_file(app: AppHandle) -> Res<Option<Value>> {
 pub async fn video_path(app: AppHandle, path: String) -> Res<Value> {
     blocking(move || finish_video(&app, &uid(), Path::new(&path), None, "")).await
 }
+
+// ---------- hook: find the most intense moment of a clip ----------
+static LOUD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"t:\s*([\d.]+)\s+TARGET:.*?M:\s*(-?[\d.]+)").unwrap());
+
+/// Best `len`-second window by short-term loudness (EBU R128 momentary values every 0.1 s).
+/// Skips the first part of the clip: a teaser of the opening seconds would spoil nothing.
+fn loudest_window(samples: &[(f64, f64)], dur: f64, len: f64) -> Option<f64> {
+    if samples.is_empty() || dur <= len {
+        return None;
+    }
+    let min_start = (dur * 0.15).min(dur - len).max(0.0);
+    let energy: Vec<(f64, f64)> = samples.iter().map(|&(t, m)| (t, 10f64.powf(m / 10.0))).collect();
+    let mut best: Option<(f64, f64)> = None;
+    let mut start = min_start;
+    while start + len <= dur + 1e-6 {
+        let (sum, n) = energy.iter().filter(|(t, _)| *t > start && *t <= start + len).fold((0.0, 0), |(s, n), (_, e)| (s + e, n + 1));
+        if n > 0 {
+            let avg = sum / n as f64;
+            if best.is_none_or(|(_, b)| avg > b) {
+                best = Some((start, avg));
+            }
+        }
+        start += 0.1;
+    }
+    // start a few frames before the loud part so the teaser has a run-up
+    best.map(|(s, _)| (s - 0.3).max(min_start.min(s)).max(0.0))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightReq {
+    video_path: String,
+    start: f64,
+    end: f64,
+    len: f64,
+}
+
+#[tauri::command]
+pub async fn find_highlight(app: AppHandle, req: HighlightReq) -> Res<Value> {
+    blocking(move || {
+        let dur = req.end - req.start;
+        let args = [s("-hide_banner"), s("-nostats"), s("-ss"), s(req.start), s("-t"), s(dur), s("-i"), s(&req.video_path), s("-vn"), s("-af"), s("ebur128=framelog=info"), s("-f"), s("null"), s("-")];
+        let mut samples = Vec::new();
+        let r = run(&tool(&app, "ffmpeg"), &args, None, |_| {}, |l| {
+            if let Some(m) = LOUD.captures(l) {
+                if let (Ok(t), Ok(v)) = (m[1].parse::<f64>(), m[2].parse::<f64>()) {
+                    samples.push((t, v));
+                }
+            }
+        })?;
+        if r.code != 0 || samples.is_empty() {
+            return Err("This clip has no audio to find a highlight in – set the moment by hand.".into());
+        }
+        let start = loudest_window(&samples, dur, req.len).ok_or("The clip is too short for a hook.")?;
+        Ok(json!({ "start": (start * 10.0).round() / 10.0 }))
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loudest_window;
+    #[test]
+    fn picks_the_loud_part_not_the_intro() {
+        // quiet 0-6 s, loud 6.0-8.0 s, quiet afterwards; 10 s clip
+        let samples: Vec<(f64, f64)> = (1..=100).map(|i| { let t = i as f64 / 10.0; (t, if (6.0..8.0).contains(&t) { -10.0 } else { -40.0 }) }).collect();
+        let s = loudest_window(&samples, 10.0, 2.0).unwrap();
+        assert!((5.4..=6.1).contains(&s), "start {s}");
+    }
+    #[test]
+    fn never_starts_in_the_first_seconds_when_avoidable() {
+        let samples: Vec<(f64, f64)> = (1..=100).map(|i| { let t = i as f64 / 10.0; (t, if t < 1.0 { -5.0 } else { -30.0 }) }).collect();
+        assert!(loudest_window(&samples, 10.0, 2.0).unwrap() >= 1.0);
+    }
+}
