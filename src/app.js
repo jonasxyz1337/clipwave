@@ -163,7 +163,7 @@ function drawHead(ctx, k, clip, t) {
 const fxTmp = document.createElement('canvas');
 function applyFxPreview(ctx, k, clip, t) {
   for (const f of clip.fx || []) {
-    if (t < f.start || t >= f.end) continue;
+    if (f.type === 'camzoom' || t < f.start || t >= f.end) continue; // the facecam zoom is drawn in drawComposite, not as an area effect
     const r = Shared.fxRect(f), x = r.x * k, y = r.y * k, w = r.w * k, hh = r.h * k;
     if (f.type === 'pixelate') {
       const a = Math.max(2, f.amount || 28) * k, tw = Math.max(1, Math.ceil(w / a)), th = Math.max(1, Math.ceil(hh / a));
