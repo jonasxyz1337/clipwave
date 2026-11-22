@@ -128,7 +128,13 @@ fn import_url(app: &AppHandle, url: &str, range: &str) -> Res<Value> {
         Some(f) if r.code == 0 => f,
         _ => return Err(friendly_ytdlp(&r.err)),
     };
-    finish_video(app, &id, &file, meta["title"].as_str().map(String::from), url)
+    let mut v = finish_video(app, &id, &file, meta["title"].as_str().map(String::from), url)?;
+    if !range.is_empty() {
+        // where the downloaded part starts inside the stream – needed to match the chat replay
+        let start = range.split('-').next().unwrap_or("0");
+        v["rangeStart"] = json!(start.split(':').fold(0.0, |a, n| a * 60.0 + n.parse::<f64>().unwrap_or(0.0)));
+    }
+    Ok(v)
 }
 
 #[tauri::command]

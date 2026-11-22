@@ -13,9 +13,11 @@
     'Georgia': ['georgia.ttf', 'georgiab.ttf'],
     'Comic Sans MS': ['comic.ttf', 'comicbd.ttf'],
     'Arial': ['arial.ttf', 'arialbd.ttf'],
+    'Segoe UI Semibold': ['seguisb.ttf'],
   };
 
   const SUB_PRESETS = {
+    'TikTok Box': { font: 'Segoe UI Semibold', size: 62, bold: false, uppercase: false, color: '#111111', hiColor: '#111111', impColor: '#111111', outlineColor: '#ffffff', outline: 0, shadow: 0, shadowColor: '#000000', mode: 'static', maxWords: 5, y: 0.72, scale: 100, box: true, boxColor: '#ffffff' },
     'Impact Pop': { font: 'Impact', size: 96, bold: false, uppercase: true, color: '#ffffff', hiColor: '#ffe14d', impColor: '#ff5ce1', outlineColor: '#000000', outline: 7, shadow: 3, shadowColor: '#000000', mode: 'highlight', maxWords: 3, y: 0.7, scale: 112 },
     'Neon Magenta': { font: 'Bahnschrift', size: 88, bold: true, uppercase: true, color: '#ffffff', hiColor: '#ff3df2', impColor: '#9be7ff', outlineColor: '#3b0a5c', outline: 6, shadow: 4, shadowColor: '#ff3df2', mode: 'highlight', maxWords: 3, y: 0.7, scale: 115 },
     'One Word Punch': { font: 'Arial Black', size: 130, bold: false, uppercase: true, color: '#ffffff', hiColor: '#ffffff', impColor: '#ffe14d', outlineColor: '#000000', outline: 8, shadow: 0, shadowColor: '#000000', mode: 'word', maxWords: 1, y: 0.62, scale: 100 },
@@ -66,14 +68,38 @@
     return { boxes };
   }
 
-  function filterGraph(L, sw, sh) {
+  function filterGraph(L, sw, sh, input = '0:v') {
     const { boxes } = computeLayout(L, sw, sh);
     const game = boxes[0], cam = boxes[1];
     const c = (b) => `crop=${b.crop.w}:${b.crop.h}:${b.crop.x}:${b.crop.y},scale=${b.dw}:${b.dh}:flags=lanczos,setsar=1`;
-    let f = cam ? `[0:v]split=2[a][b];[a]${c(game)},pad=${W}:${H}:${game.dx}:${game.dy}:black[bg];[b]${c(cam)}[cam];[bg][cam]overlay=${cam.dx}:${cam.dy}` : `[0:v]${c(game)}`;
+    let f = cam ? `[${input}]split=2[a][b];[a]${c(game)},pad=${W}:${H}:${game.dx}:${game.dy}:black[bg];[b]${c(cam)}[cam];[bg][cam]overlay=${cam.dx}:${cam.dy}` : `[${input}]${c(game)}`;
     if (L.filter === 'bw') f += ',hue=s=0';
     else if (L.filter === 'bwc') f += ',hue=s=0,eq=contrast=1.3:brightness=-0.03';
     return f;
+  }
+
+  // ---------- facecam zoom: cut to a 9:16 close-up of the facecam with a quick push-in ----------
+  // source-pixel rectangle around the facecam (null when the layout has no facecam)
+  function camZoomRect(L, sw, sh) {
+    const cam = computeLayout(L, sw, sh).boxes.find((b) => b.role === 'cam'); if (!cam) return null;
+    const c = cam.crop, cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+    let h = Math.min(sh, c.h * 1.15), w = (h * 9) / 16;
+    if (w > sw) { w = sw; h = (w * 16) / 9; }
+    w = even(w); h = even(h);
+    return { x: even(clamp(cx - w / 2, 0, sw - w)), y: even(clamp(cy - h / 2, 0, sh - h)), w, h };
+  }
+  const camZoomAt = (f, t) => 1 + ((f.amount == null ? 12 : f.amount) / 100) * clamp((t - f.start) / 0.35, 0, 1);
+  // overlays the close-ups on `inLabel`; `srcLabels[i]` are copies of the source video
+  function camZoomGraph(list, inLabel, srcLabels, L, sw, sh, fps) {
+    const r = camZoomRect(L, sw, sh); let cur = inLabel; const parts = [];
+    if (!r) return { graph: '', out: cur };
+    list.forEach((f, i) => {
+      const A = ((f.amount == null ? 12 : f.amount) / 100).toFixed(3), S = Math.max(0, f.start).toFixed(3), E = Math.max(f.end, f.start + 0.05).toFixed(3);
+      parts.push(`[${srcLabels[i]}]crop=${r.w}:${r.h}:${r.x}:${r.y},scale=${W}:${H}:flags=lanczos,setsar=1,zoompan=z='1+${A}*clip((it-${S})/0.35\\,0\\,1)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=${W}x${H}:fps=${fps},setsar=1[czo${i}]`,
+        `[${cur}][czo${i}]overlay=0:0:enable='between(t\\,${S}\\,${E})'[czv${i}]`);
+      cur = `czv${i}`;
+    });
+    return { graph: parts.join(';'), out: cur };
   }
 
   // ---------- captions ----------
@@ -152,6 +178,17 @@
   }
   const roundPath = (w, h, r) => { const c = r * 0.45; return `m ${r} 0 l ${w - r} 0 b ${w - c} 0 ${w} ${c} ${w} ${r} l ${w} ${h - r} b ${w} ${h - c} ${w - c} ${h} ${w - r} ${h} l ${r} ${h} b ${c} ${h} 0 ${h - c} 0 ${h - r} l 0 ${r} b 0 ${c} ${c} 0 ${r} 0`; };
 
+  // line breaking + box sizes for boxed subtitles (same estimate for preview and export)
+  const textW = (t, size) => [...t].reduce((a, ch) => a + (/[A-ZÄÖÜMW@%&]/.test(ch) ? 0.66 : /[il.,:;'!|]/.test(ch) ? 0.27 : ch === ' ' ? 0.27 : 0.49), 0) * size;
+  function subBoxLines(words, sub, cy) {
+    const sz = sub.size, padX = Math.round(sz * 0.38), lh = Math.round(sz * 1.32), maxW = 900;
+    const rows = [[]];
+    words.forEach((w, i) => { const row = rows[rows.length - 1]; const cand = [...row.map((j) => words[j]), w].join(' '); if (row.length && textW(cand, sz) > maxW) rows.push([i]); else row.push(i); });
+    let y = Math.round(cy - (rows.length * lh) / 2), out = [];
+    rows.forEach((row) => { const w = Math.round(textW(row.map((j) => words[j]).join(' '), sz) + padX * 2); out.push({ from: row[0], to: row[row.length - 1] + 1, x: Math.round((W - w) / 2), y, w, h: lh }); y += lh - Math.round(sz * 0.06); });
+    return { lines: out, r: Math.round(sz * 0.3) };
+  }
+
   function buildAss({ words, dur, sub, head, showSubs = true, showHead = true }) {
     const lines = [];
     lines.push('[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${W}`, `PlayResY: ${H}`, 'WrapStyle: 0', 'ScaledBorderAndShadow: yes', '');
@@ -171,7 +208,17 @@
           if (active) return `{${tc(sub.hiColor)}\\fscx${sub.scale}\\fscy${sub.scale}}${t}{\\r}`;
           if (w.imp) return `{${tc(sub.impColor)}}${t}{\\r}`;
           return t;
-        }).join(' ');
+        });
+        if (sub.box) {
+          // TikTok look: every line sits in its own rounded box
+          const g = subBoxLines(ev.group.map((w) => (sub.uppercase ? w.w.toUpperCase() : w.w)), sub, y);
+          g.lines.forEach((ln) => {
+            lines.push(`Dialogue: 0,${ts(ev.s)},${ts(ev.e)},Sub,,0,0,0,,{\\an7\\pos(${ln.x},${ln.y})\\bord0\\shad0\\1c&H${bgr(sub.boxColor || '#ffffff')}&\\p1}${roundPath(ln.w, ln.h, g.r)}`);
+            lines.push(`Dialogue: 1,${ts(ev.s)},${ts(ev.e)},Sub,,0,0,0,,{\\an5\\pos(${W / 2},${ln.y + ln.h / 2})\\bord0\\shad0}${text.slice(ln.from, ln.to).join(' ')}`);
+          });
+          continue;
+        }
+        text = text.join(' ');
         lines.push(`Dialogue: 0,${ts(ev.s)},${ts(ev.e)},Sub,,0,0,0,,{\\an5\\pos(${W / 2},${y})}${text}`);
       }
     }
@@ -201,7 +248,7 @@
   // chains effects on a labelled video stream; returns { graph, out } (graph is '' when there are none)
   function fxGraph(list, inLabel) {
     let cur = inLabel; const parts = [];
-    (list || []).forEach((f, i) => {
+    (list || []).filter((f) => f.type !== 'camzoom').forEach((f, i) => {
       const r = fxRect(f), crop = `crop=${r.w}:${r.h}:${r.x}:${r.y}`;
       let eff;
       if (f.type === 'pixelate') { const a = Math.max(2, Math.round(f.amount || 28)); eff = `${crop},scale=${Math.max(1, Math.ceil(r.w / a))}:${Math.max(1, Math.ceil(r.h / a))}:flags=area,scale=${r.w}:${r.h}:flags=neighbor`; }
@@ -272,6 +319,6 @@
     return L.join('\n') + '\n';
   }
 
-  const api = { DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
+  const api = { camZoomRect, camZoomAt, camZoomGraph, subBoxLines, textW, DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else g.Shared = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -58,7 +58,7 @@ function confirmDlg(title, text, ok = 'Delete') {
 const DEF = { lang: 'auto', outDir: '', quality: 'high', fps: 'source', encoder: 'x264', speed: 'veryfast', threads: 0, accent: 'Magenta', motion: true, palms: true, uiScale: 100, autoTranscribe: false, model: 'small', engine: 'auto', elKey: '', subPreset: 'Impact Pop', filename: '{title}_clip{n}', openWhenDone: false };
 const S = { videos: [], clips: [], history: [], presets: { sub: {}, head: {} }, settings: { ...DEF }, selVideo: null, selClip: null, tab: 'home' };
 const T = { audios: {}, fxSel: null, sndSel: null, row: 0, busy: {}, jobs: {}, importing: null, urlText: '', range: { start: 0, end: 10 }, view: null, exporting: false, env: {}, sel: {} };
-const TABS = [['home', 'Home'], ['editor', 'Clip Editor'], ['hook', 'Hook'], ['subtitles', 'Subtitles'], ['layout', 'Layout'], ['headlines', 'Headlines'], ['effects', 'Effects'], ['sounds', 'Sounds'], ['export', 'Export'], ['settings', 'Settings']];
+const TABS = [['home', 'Home'], ['editor', 'Clip Editor'], ['hook', 'Hook'], ['subtitles', 'Subtitles'], ['layout', 'Layout'], ['headlines', 'Headlines'], ['graphics', 'Graphics'], ['effects', 'Effects'], ['sounds', 'Sounds'], ['export', 'Export'], ['settings', 'Settings']];
 const LANGS = [['auto', 'Auto-detect'], ['en', 'English'], ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'], ['it', 'Italiano'], ['pt', 'Português'], ['nl', 'Nederlands'], ['pl', 'Polski'], ['tr', 'Türkçe'], ['ru', 'Русский'], ['ja', '日本語']];
 const ACCENTS = { Magenta: ['#b955bd', '#6b2c93', '#3c1458'], Violet: ['#8b62dc', '#47309a', '#22134f'], 'Ultra Blue': ['#6478e8', '#3238a0', '#16185a'], Rose: ['#e0559f', '#80256f', '#40103f'] };
 const QUALITY = { draft: ['Draft', 24], standard: ['Standard', 20], high: ['High', 17], max: ['Maximum', 14] };
@@ -106,6 +106,7 @@ function drawSubs(ctx, k, clip, t) {
   const key = JSON.stringify([sub.mode, sub.maxWords, clip.words.length, clip.words[0].s]);
   let c = evCache.get(clip); if (!c || c.key !== key || c.words !== clip.words) { c = { key, words: clip.words, ev: Shared.subEvents(clip.words, sub) }; evCache.set(clip, c); }
   const ev = c.ev.find((e) => t >= e.s && t < e.e); if (!ev) return;
+  if (sub.box) { drawSubBox(ctx, k, sub, ev); return; }
   const fs = sub.size * 0.86 * k; ctx.font = `${sub.bold ? 'bold ' : ''}${fs}px "${sub.font}", sans-serif`; ctx.textBaseline = 'middle';
   const items = ev.group.map((w, j) => ({ t: sub.uppercase ? w.w.toUpperCase() : w.w, imp: w.imp, act: j === ev.idx }));
   const sp = ctx.measureText(' ').width; items.forEach((i) => (i.w = ctx.measureText(i.t).width));
@@ -124,6 +125,17 @@ function drawSubs(ctx, k, clip, t) {
     }
     y += lh;
   }
+}
+// TikTok look: each line in its own rounded box (same geometry as the export)
+function drawSubBox(ctx, k, sub, ev) {
+  const words = ev.group.map((w) => (sub.uppercase ? w.w.toUpperCase() : w.w)), g = Shared.subBoxLines(words, sub, sub.y * 1920);
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `${sub.size * 0.86 * k}px "${sub.font}", sans-serif`;
+  for (const ln of g.lines) {
+    ctx.fillStyle = sub.boxColor || '#ffffff'; ctx.beginPath(); ctx.roundRect(ln.x * k, ln.y * k, ln.w * k, ln.h * k, g.r * k); ctx.fill();
+    ctx.fillStyle = sub.color; ctx.fillText(words.slice(ln.from, ln.to).join(' '), 540 * k, (ln.y + ln.h / 2) * k);
+  }
+  ctx.restore();
 }
 function drawHead(ctx, k, clip, t) {
   const hd = clip.head; if (!hd.text || !hd.text.trim()) return;
@@ -183,11 +195,14 @@ function drawComposite(ctx, clip, v, t) {
     const { boxes } = Shared.computeLayout(clip.layout, V.videoWidth || v.w, V.videoHeight || v.h);
     ctx.filter = clip.layout.filter === 'bw' ? 'grayscale(1)' : clip.layout.filter === 'bwc' ? 'grayscale(1) contrast(1.3) brightness(.97)' : 'none';
     for (const b of boxes) ctx.drawImage(V, b.crop.x, b.crop.y, b.crop.w, b.crop.h, b.dx * k, b.dy * k, b.dw * k, b.dh * k);
+    const cz = (clip.fx || []).find((f) => f.type === 'camzoom' && t >= f.start && t < f.end), zr = cz && Shared.camZoomRect(clip.layout, V.videoWidth || v.w, V.videoHeight || v.h);
+    if (zr) { const z = Shared.camZoomAt(cz, t), w = zr.w / z, hh = zr.h / z; ctx.drawImage(V, zr.x + (zr.w - w) / 2, zr.y + (zr.h - hh) / 2, w, hh, 0, 0, cw, ctx.canvas.height); }
     ctx.filter = 'none';
     applyFxPreview(ctx, k, clip, t);
   }
   if (clip.subsOn) drawSubs(ctx, k, clip, t);
   if (clip.headOn) drawHead(ctx, k, clip, t);
+  Gfx.drawAll(ctx, k, clip.gfx, t);
   drawHookPreview(ctx, k, clip, t);
 }
 function drawHookPreview(ctx, k, clip, t) {
@@ -371,7 +386,7 @@ function addClip() {
   const sub = clone(base ? base.sub : SUB_PRESETS[S.settings.subPreset] ? { ...SUB_PRESETS[S.settings.subPreset], preset: S.settings.subPreset } : { ...SUB_PRESETS['Impact Pop'], preset: 'Impact Pop' });
   const head = clone(base ? { ...base.head, text: '' } : { ...HEAD_PRESETS['Bold Statement'], text: '' });
   const n = S.clips.filter((c) => c.videoId === v.id).length + 1;
-  const c = { id: uid(), videoId: v.id, name: `Clip ${n}`, start: T.range.start, end: T.range.end, words: null, subsOn: true, headOn: true, layout: clone(base ? base.layout : DEFAULT_LAYOUT), sub, head, outro: clone(base && base.outro ? base.outro : Shared.DEFAULT_OUTRO), fx: [], sounds: [], origVol: 1, hook: clone(Shared.DEFAULT_HOOK) };
+  const c = { id: uid(), videoId: v.id, name: `Clip ${n}`, start: T.range.start, end: T.range.end, words: null, subsOn: true, headOn: true, layout: clone(base ? base.layout : DEFAULT_LAYOUT), sub, head, outro: clone(base && base.outro ? base.outro : Shared.DEFAULT_OUTRO), fx: [], sounds: [], origVol: 1, hook: clone(Shared.DEFAULT_HOOK), gfx: [] };
   S.clips.unshift(c); S.selClip = c.id; save(); toast(`${c.name} added (${fmt(c.end - c.start)}s).`);
   if (S.settings.autoTranscribe) transcribeClip(c);
   render(true);
@@ -463,6 +478,8 @@ function pageSubs() {
   L.push(colorRow('Active word color', () => s().hiColor, (v) => (s().hiColor = v), { desc: 'The word currently being spoken.' }));
   L.push(colorRow('Important word color', () => s().impColor, (v) => (s().impColor = v), { desc: 'Color for words marked as important (click words in the list below).' }));
   L.push(colorRow('Outline color', () => s().outlineColor, (v) => (s().outlineColor = v)));
+  L.push(toggleRow('Box behind text (TikTok look)', () => !!s().box, (v) => (s().box = v), { rebuild: true, desc: 'Puts every subtitle line in its own rounded box, like TikTok’s text style. Pick dark text for a white box.' }));
+  if (s().box) L.push(colorRow('Box color', () => s().boxColor || '#ffffff', (v) => (s().boxColor = v)));
   L.push(rangeRow('Outline', () => s().outline, (v) => (s().outline = v), 0, 16, 1, (v) => v + ' px'));
   L.push(rangeRow('Shadow', () => s().shadow, (v) => (s().shadow = v), 0, 14, 1, (v) => v + ' px'));
   L.push(colorRow('Shadow color', () => s().shadowColor, (v) => (s().shadowColor = v)));
@@ -579,6 +596,105 @@ function pageHook() {
   return L;
 }
 
+
+// ---------- GRAPHICS (motion graphics / Einblender) ----------
+const GFX_COLORS = [['pink', 'Pink'], ['green', 'Green'], ['yellow', 'Yellow'], ['red', 'Red'], ['blue', 'Blue'], ['purple', 'Purple'], ['white', 'White']];
+// emoji for words people say in hype moments (German + English)
+const EMOJI = [[/^(insane|crazy|verrückt|wahnsinn|unglaublich|krass|heftig|brutal)/i, '🤯'], [/^(lol|lmao|haha|hahaha|lustig|witzig)/i, '😂'], [/^(geil|fire|feuer|hype|lit|nice|stark)/i, '🔥'],
+  [/^(tot|dead|killer|sterben|rip|kill)/i, '💀'], [/^(wow|omg|was|what|digga|alter)/i, '😱'], [/^(geld|money|euro|dollar|cash|reich)/i, '💸'], [/^(gewonnen|win|sieg|champion|gg|first)/i, '🏆'],
+  [/^(liebe|love|herz)/i, '❤️'], [/^(nein|no|never|niemals)/i, '🚫'], [/^(schnell|fast|speed|sofort)/i, '⚡']];
+const emojiFor = (w) => { const t = w.replace(/[^\p{L}\p{N}]/gu, ''); const m = EMOJI.find(([re]) => re.test(t)); return m ? m[1] : ''; };
+const parseHms = (t) => String(t || '').split(':').map(Number).reduce((a, n) => a * 60 + (n || 0), 0);
+const hmsText = (s) => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+
+const hasChatReplay = (v) => /twitch\.tv|clips\.twitch|youtube\.com|youtu\.be/i.test((v && v.url) || '');
+// real chat of the stream at the clip's moment: { offset (stream time at file start), msgs: [{ t (file time), name, color, text }] }
+async function loadChat(c) {
+  const v = vidOf(c);
+  if (!hasChatReplay(v)) throw new Error('Real chat needs a clip imported from a Twitch clip/VOD or a YouTube live-stream replay.');
+  return api.chatReplay({ url: v.url, rangeStart: v.rangeStart || 0, start: c.start, end: c.end, lead: 20 });
+}
+// chat graphic with the real messages (times made relative to the clip)
+function realChatItem(c, chat, start, end) {
+  const dur = c.end - c.start;
+  return Gfx.make('chat', start, dur, { end: Math.min(dur, end), msgs: chat.msgs.map((m) => ({ ...m, t: Math.round((m.t - c.start) * 100) / 100 })), lines: '' });
+}
+
+async function autoGraphics(c) {
+  const v = vidOf(c), dur = c.end - c.start;
+  if (!c.words && T.env.whisper) { toast('Transcribing first…'); await transcribeClip(c); }
+  c.gfx = (c.gfx || []).filter((x) => !x.auto);
+  const add = (type, start, extra) => { const it = Gfx.make(type, start, dur, { ...extra, auto: true }); if (it.end - it.start >= 0.6) c.gfx.push(it); return it; };
+  // streams: real chat of that moment + LIVE badge with the real stream time
+  let chat = null;
+  if (hasChatReplay(v)) { try { toast('Loading the stream chat…'); chat = await loadChat(c); } catch (e) { toast(e.message, true); } }
+  if (chat || /kick\.com|\/live\//i.test(v.url || '')) add('live', 0.2, { since: Math.floor((chat ? chat.offset : 0) + c.start + 0.2) });
+  if (chat && chat.msgs.filter((m) => m.t >= c.start && m.t <= c.end).length >= 3) {
+    // show the chat during the busiest 6 seconds of the clip
+    const inClip = chat.msgs.map((m) => m.t - c.start).filter((t) => t >= 0 && t <= dur), win = Math.min(6, dur);
+    let best = 0, bestN = -1;
+    for (let s0 = 0; s0 + win <= dur + 0.01; s0 += 0.5) { const n = inClip.filter((t) => t >= s0 && t < s0 + win).length; if (n > bestN) { bestN = n; best = s0; } }
+    const it = realChatItem(c, chat, best, best + win); it.auto = true; c.gfx.push(it);
+  }
+  // big words for the strongest things said
+  const words = (c.words || []).filter((w) => w.w.replace(/[^\p{L}\p{N}]/gu, '').length >= 2);
+  const cand = words.map((w) => ({ w, e: emojiFor(w.w), score: (emojiFor(w.w) ? 2 : 0) + (w.imp ? 1 : 0) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || a.w.s - b.w.s);
+  const max = Math.max(2, Math.floor(dur / 6)), picked = [];
+  for (const x of cand) { if (picked.length >= max) break; if (x.w.s < 0.8 || picked.some((p) => Math.abs(p.w.s - x.w.s) < 3.5)) continue; picked.push(x); }
+  picked.forEach((x, i) => add('pop', x.w.s, { text: (x.w.w.replace(/[^\p{L}\p{N}'-]/gu, '').toUpperCase() + (x.e ? ' ' + x.e : '')).trim(), color: ['pink', 'yellow', 'green', 'blue'][i % 4] }));
+  // hype badge at the loudest moment
+  try {
+    const r = await api.findHighlight({ videoPath: v.path, start: c.start, end: c.end, len: 2 });
+    if (!picked.some((p) => Math.abs(p.w.s - (r.start + 0.4)) < 2)) add('badge', r.start + 0.4, { text: "LET'S GO 🔥", color: 'green', y: 0.3 });
+  } catch {}
+  c.gfx.sort((a, b) => a.start - b.start); save(); stageDirty = true;
+  const n = c.gfx.filter((x) => x.auto).length;
+  toast(n ? `${n} graphics added – play the preview to see them.` : 'Nothing striking found. Add graphics by hand below.', !n);
+}
+
+function pageGraphics() {
+  const c = curClip(); if (!c) return needClipItems('Create a clip first, then add motion graphics (badges, counters, chat, big words) to it.');
+  c.gfx = c.gfx || []; const dur = c.end - c.start, L = [];
+  if (!c.gfx.find((x) => x.id === T.gfxSel)) T.gfxSel = c.gfx[0] ? c.gfx[0].id : null;
+  const it = c.gfx.find((x) => x.id === T.gfxSel);
+  L.push(sec('Motion graphics'));
+  L.push(actionRow('✨ Add graphics automatically', async () => { try { await autoGraphics(c); } catch (e) { toast(e.message, true); } softRender(); }, { desc: 'Looks at the clip: big words with emoji for the strongest things said, a hype badge at the loudest moment and – for streams – a LIVE badge with the real stream time. Replaces earlier automatic graphics, keeps yours.' }));
+  if (!c.gfx.length) L.push({ type: 'custom', node: h('div', { class: 'empty' }, 'No graphics yet. Add them automatically or pick one below.') });
+  c.gfx.forEach((x) => L.push({ type: 'clip', label: (x.id === T.gfxSel ? '▶ ' : '') + Gfx.TYPES[x.type].name + (x.text ? ` · ${x.text}` : x.type === 'counter' ? ` · ${x.to}${x.suffix || ''}` : ''), value: `${fmt(x.start)} → ${fmt(x.end)}`, fn: () => { T.gfxSel = x.id; V.currentTime = c.start + x.start + 0.4; stageDirty = true; softRender(); }, mini: [['✕', 'Delete', () => { c.gfx = c.gfx.filter((y) => y !== x); save(); stageDirty = true; softRender(); }]], desc: 'Click to select and jump to it in the preview.' }));
+  L.push(sec('Add'));
+  for (const [type, desc] of [['pop', 'Big punchy word or phrase, emoji welcome: “INSANE 🤯”, “why?”.'], ['counter', 'Number counting up in a glowing box, e.g. 0 → 6.215 €.'], ['live', 'Red “LIVE SEIT 08:51:02” badge – the time keeps running.'],
+    ['chat', 'Live chat box, messages pop in one after another.'], ['badge', 'Neon badge with a wiggle, e.g. GRATIS / NEU / W.'], ['info', 'Dark panel with a colored tag: “Skill = …”.'], ['label', 'Small white label: “SO FUNKTIONIERT’S”.']])
+    L.push(actionRow('Add ' + Gfx.TYPES[type].name.toLowerCase(), () => { const n = Gfx.make(type, relNow(c), dur); if (n.end - n.start < 0.5) { n.start = Math.max(0, dur - Gfx.TYPES[type].dur); n.end = dur; } c.gfx.push(n); T.gfxSel = n.id; save(); stageDirty = true; softRender(); }, { desc: desc + ' Starts at the playhead.' }));
+  if (it) {
+    const setS = (v) => { const d = it.end - it.start; it.start = clamp(v, 0, dur - 0.3); it.end = Math.min(dur, it.start + d); };
+    const txt = (label, get, set, ph, desc) => L.push({ type: 'text', label, placeholder: ph || '', get, set: (v) => { set(v); stageDirty = true; save(); }, desc });
+    const field = (label, key, ph, desc) => txt(label, () => String(it[key] ?? ''), (v) => (it[key] = v), ph, desc);
+    L.push(sec('Selected: ' + Gfx.TYPES[it.type].name));
+    if (['pop', 'badge', 'label'].includes(it.type)) field('Text', 'text', '', 'Emoji work too: 🔥 🤯 💀 😂 💸');
+    if (it.type === 'pop') L.push(enumRow('Style', () => it.style || 'bold', (v) => (it.style = v), [['bold', 'Bold outline'], ['serif', 'Elegant italic']]));
+    if (it.type === 'live') { field('Text', 'text', 'LIVE SEIT'); txt('Live since', () => hmsText(it.since || 0), (v) => (it.since = parseHms(v)), '8:51:02', 'Stream time shown when the badge appears (h:mm:ss); it keeps counting. Automatic badges use the real position in the stream.'); }
+    if (it.type === 'counter') { field('From', 'from', '0'); field('To', 'to', '6215'); field('Before number', 'prefix', ''); field('After number', 'suffix', ' €'); }
+    if (it.type === 'chat') {
+      if (hasChatReplay(vidOf(c))) L.push(actionRow(it.msgs ? `Real chat loaded (${it.msgs.filter((m) => m.t >= it.start - 0.01 && m.t <= it.end).length} messages here)` : 'Load real chat from the stream', async () => {
+        try { toast('Loading the stream chat…'); const chat = await loadChat(c); const n = realChatItem(c, chat, it.start, it.end); it.msgs = n.msgs; it.lines = ''; save(); stageDirty = true; softRender(); toast(`${it.msgs.length} chat messages loaded – they appear exactly when they were written.`); }
+        catch (e) { toast(e.message, true); }
+      }, { desc: 'Shows what the chat really wrote at this moment of the stream (Twitch clips/VODs, YouTube live replays). Messages appear at the second they were sent.' }));
+      if (it.msgs) L.push(actionRow('Use my own messages instead', () => { delete it.msgs; it.lines = Gfx.TYPES.chat.def.lines; save(); stageDirty = true; softRender(); }));
+      else field('Messages', 'lines', 'name: message | name: message', 'Separate messages with | and start each with “name:”.');
+    }
+    if (it.type === 'info') { field('Tag', 'tag', 'Skill ='); field('Text', 'text', ''); }
+    if (['pop', 'counter', 'badge', 'info'].includes(it.type)) L.push(enumRow('Color', () => it.color || 'pink', (v) => (it.color = v), GFX_COLORS));
+    L.push(rangeRow('Starts at', () => it.start, setS, 0, dur, 0.1, (v) => fmt(v) + ' s', { rebuild: true }));
+    L.push(rangeRow('Length (on screen)', () => it.end - it.start, (v) => (it.end = Math.min(dur, it.start + v)), 0.5, Math.max(1, dur), 0.1, (v) => v.toFixed(1) + ' s', { rebuild: true }));
+    L.push(actionRow('Start = playhead', () => { setS(relNow(c)); save(); softRender(); }));
+    L.push(rangeRow('Size', () => it.size || 1, (v) => (it.size = v), 0.3, 2.5, 0.05, (v) => Math.round(v * 100) + ' %', { desc: 'Makes the graphic bigger or smaller.' }));
+    if (it.type === 'chat') L.push(rangeRow('Visible messages', () => it.rows || 6, (v) => (it.rows = v), 2, 12, 1, (v) => v + ' lines', { desc: 'How many chat lines the box shows at once.' }));
+    L.push(rangeRow('Position X', () => it.x, (v) => (it.x = v), 0.1, 0.9, 0.01, (v) => Math.round(v * 100) + ' %'));
+    L.push(rangeRow('Position Y', () => it.y, (v) => (it.y = v), 0.03, 0.95, 0.01, (v) => Math.round(v * 100) + ' %'));
+  }
+  return L;
+}
+
 // ---------- HEADLINES ----------
 function pageHeads() {
   const c = curClip(); if (!c) return needClipItems('Create a clip first, then add a headline here.');
@@ -610,13 +726,13 @@ function pageHeads() {
 // ---------- EFFECTS ----------
 // effects/sounds: refresh list + boxes only, never remount the preview
 function softRender() { if (S.tab === 'effects' || S.tab === 'sounds') { refreshList(); renderFxOverlay(T.stageClip); } else render(true); }
-const FX_NAMES = { pixelate: 'Pixelate', blur: 'Blur', bw: 'Black & white' };
+const FX_NAMES = { pixelate: 'Pixelate', blur: 'Blur', bw: 'Black & white', camzoom: 'Facecam zoom' };
 const relNow = (c) => clamp(V.currentTime - c.start, 0, c.end - c.start);
 function renderFxOverlay(c) {
   const ov = Stage.ovl; if (!ov) return; ov.replaceChildren();
   if (S.tab !== 'effects' || !c) { ov.style.pointerEvents = 'none'; return; }
   ov.style.pointerEvents = 'auto';
-  (c.fx || []).forEach((f) => {
+  (c.fx || []).filter((f) => f.type !== 'camzoom').forEach((f) => {
     const r = Shared.fxRect(f), sel = f.id === T.fxSel;
     const b = h('div', { class: 'fxbox' + (sel ? ' sel' : ''), style: `left:${r.x / 10.8}%;top:${r.y / 19.2}%;width:${r.w / 10.8}%;height:${r.h / 19.2}%` }, h('span', { class: 'fxl' }, FX_NAMES[f.type]));
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); T.fxSel = f.id; dragFx(e, f, 'move', b); });
@@ -648,20 +764,26 @@ function pageEffects() {
   L.push(actionRow('Add pixelate area', add('pixelate'), { desc: 'Censors something (faces, names, chat, numbers) with big pixels. Starts at the current playhead and lasts 3 s – change the timing below.' }));
   L.push(actionRow('Add blur area', add('blur'), { desc: 'Soft blur over an area, timed.' }));
   L.push(actionRow('Add black & white area', add('bw'), { desc: 'Turns just this area black & white for a moment. Make it cover the whole frame for a full-screen B&W moment.' }));
+  L.push(actionRow('Add facecam zoom', () => {
+    if (!Shared.camZoomRect(c.layout, vidOf(c).w, vidOf(c).h)) return toast('This layout has no facecam. Choose “Split screen” or “Facecam overlay” in Layout first.', true);
+    const s0 = relNow(c), nf = { id: uid(), type: 'camzoom', x: 0, y: 0, w: 1080, h: 1920, start: s0, end: Math.min(dur, s0 + 2), amount: 12 }; if (nf.end - nf.start < 0.5) { nf.start = Math.max(0, dur - 2); nf.end = dur; }
+    c.fx.push(nf); T.fxSel = nf.id; save(); softRender(); stageDirty = true;
+  }, { desc: 'When something great happens in the facecam: cuts to a full-screen close-up of the facecam with a quick push-in, then back. Starts at the playhead, lasts 2 s.' }));
   if (f) {
     const setS = (v) => { f.start = v; if (f.end <= f.start + 0.1) f.end = Math.min(dur, f.start + 0.5); if (f.end <= f.start + 0.1) f.start = Math.max(0, f.end - 0.5); };
     const setE = (v) => { f.end = v; if (f.end <= f.start + 0.1) f.start = Math.max(0, f.end - 0.5); };
     L.push(sec('Selected effect'));
-    L.push(enumRow('Type', () => f.type, (v) => { f.type = v; }, [['pixelate', 'Pixelate'], ['blur', 'Blur'], ['bw', 'Black & white']], { rebuild: true }));
-    if (f.type !== 'bw') L.push(rangeRow(f.type === 'pixelate' ? 'Pixel size' : 'Blur strength', () => f.amount || 28, (v) => (f.amount = v), 4, 100, 2, (v) => v + ' px', { desc: 'Larger = stronger censoring.' }));
+    L.push(enumRow('Type', () => f.type, (v) => { f.type = v; if (v === 'camzoom') f.amount = 12; }, [['pixelate', 'Pixelate'], ['blur', 'Blur'], ['bw', 'Black & white'], ['camzoom', 'Facecam zoom']], { rebuild: true }));
+    if (f.type === 'camzoom') L.push(rangeRow('Push-in', () => (f.amount == null ? 12 : f.amount), (v) => (f.amount = v), 0, 40, 1, (v) => (v ? '+' + v + ' %' : 'Off'), { desc: 'How much the close-up zooms in during the first moment. 0 = just cut to the facecam.' }));
+    else if (f.type !== 'bw') L.push(rangeRow(f.type === 'pixelate' ? 'Pixel size' : 'Blur strength', () => f.amount || 28, (v) => (f.amount = v), 4, 100, 2, (v) => v + ' px', { desc: 'Larger = stronger censoring.' }));
     L.push(rangeRow('Starts at', () => f.start, setS, 0, dur, 0.1, (v) => fmt(v) + ' s', { rebuild: true, desc: 'When the effect switches on (seconds from the start of the clip).' }));
     L.push(rangeRow('Ends at', () => f.end, setE, 0, dur, 0.1, (v) => fmt(v) + ' s', { rebuild: true, desc: 'When the effect switches off.' }));
     L.push(actionRow('Start = playhead', () => { setS(relNow(c)); save(); softRender(); }, { desc: 'Scrub the preview to the right moment, then use this to set the start exactly.' }));
     L.push(actionRow('End = playhead', () => { setE(relNow(c)); save(); softRender(); }));
-    L.push(rangeRow('Position X', () => Shared.fxRect(f).x / 1080, (v) => { const r = Shared.fxRect(f); f.x = v * 1080; f.w = r.w; f.y = r.y; f.h = r.h; }, 0, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
-    L.push(rangeRow('Position Y', () => Shared.fxRect(f).y / 1920, (v) => { const r = Shared.fxRect(f); f.y = v * 1920; f.w = r.w; f.x = r.x; f.h = r.h; }, 0, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
-    L.push(rangeRow('Width', () => Shared.fxRect(f).w / 1080, (v) => { f.w = Math.max(48, v * 1080); }, 0.05, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
-    L.push(rangeRow('Height', () => Shared.fxRect(f).h / 1920, (v) => { f.h = Math.max(48, v * 1920); }, 0.03, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
+    if (f.type !== 'camzoom') L.push(rangeRow('Position X', () => Shared.fxRect(f).x / 1080, (v) => { const r = Shared.fxRect(f); f.x = v * 1080; f.w = r.w; f.y = r.y; f.h = r.h; }, 0, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
+    if (f.type !== 'camzoom') L.push(rangeRow('Position Y', () => Shared.fxRect(f).y / 1920, (v) => { const r = Shared.fxRect(f); f.y = v * 1920; f.w = r.w; f.x = r.x; f.h = r.h; }, 0, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
+    if (f.type !== 'camzoom') L.push(rangeRow('Width', () => Shared.fxRect(f).w / 1080, (v) => { f.w = Math.max(48, v * 1080); }, 0.05, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
+    if (f.type !== 'camzoom') L.push(rangeRow('Height', () => Shared.fxRect(f).h / 1920, (v) => { f.h = Math.max(48, v * 1920); }, 0.03, 1, 0.01, (v) => Math.round(v * 100) + ' %', { rebuild: true }));
   }
   return L;
 }
@@ -750,7 +872,7 @@ async function runExport(clips) {
       const base = S.settings.filename.replace('{title}', v.title).replace('{n}', String(S.clips.filter((x) => x.videoId === c.videoId).reverse().indexOf(c) + 1)).replace('{name}', c.name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 80) || 'clip';
       let out = `${dir}\\${base}.mp4`, k = 2; while (await api.exists(out)) out = `${dir}\\${base}_${k++}.mp4`;
       const jobId = uid(); T.jobs[jobId] = { clipId: c.id, pct: 0, name: c.name };
-      jobs.push({ jobId, videoPath: v.path, w: v.w, h: v.h, start: c.start, end: c.end, words: c.words || [], sub: c.sub, head: c.head, layout: c.layout, subsOn: c.subsOn, headOn: c.headOn, out, crf, preset: S.settings.speed, fps: S.settings.fps === 'source' ? (c.outro && c.outro.on ? Math.min(60, Math.round(v.fps || 30)) : 0) : Number(S.settings.fps), encoder: S.settings.encoder, threads: S.settings.threads, fx: c.fx || [], sounds: c.sounds || [], origVol: c.origVol == null ? 1 : c.origVol, hook: Shared.hookWindow(c.hook, c.end - c.start) ? { ...c.hook, ...Shared.hookWindow(c.hook, c.end - c.start) } : null, outro: c.outro || null, outroDur: Shared.outroDuration(c.outro, c.end - c.start + ((Shared.hookWindow(c.hook, c.end - c.start) || {}).len || 0)), hasAudio: v.hasAudio !== false });
+      jobs.push({ jobId, videoPath: v.path, w: v.w, h: v.h, start: c.start, end: c.end, words: c.words || [], sub: c.sub, head: c.head, layout: c.layout, subsOn: c.subsOn, headOn: c.headOn, out, crf, preset: S.settings.speed, fps: S.settings.fps === 'source' ? (c.outro && c.outro.on ? Math.min(60, Math.round(v.fps || 30)) : 0) : Number(S.settings.fps), encoder: S.settings.encoder, threads: S.settings.threads, fx: c.fx || [], gfx: c.gfx || [], srcFps: v.fps || 30, sounds: c.sounds || [], origVol: c.origVol == null ? 1 : c.origVol, hook: Shared.hookWindow(c.hook, c.end - c.start) ? { ...c.hook, ...Shared.hookWindow(c.hook, c.end - c.start) } : null, outro: c.outro || null, outroDur: Shared.outroDuration(c.outro, c.end - c.start + ((Shared.hookWindow(c.hook, c.end - c.start) || {}).len || 0)), hasAudio: v.hasAudio !== false });
     }
     if (jobs.length) { toast(`Rendering ${jobs.length} clip(s) in the background…`); await api.exportBatch(jobs); const ok = jobs.filter((j) => T.jobs[j.jobId]?.done && !T.jobs[j.jobId].error).length; toast(`Export finished: ${ok} of ${jobs.length} succeeded.`, ok < jobs.length); }
   } catch (e) { toast(e.message, true); }
@@ -834,13 +956,13 @@ function onUpdate(u) {
 }
 
 // ================= engine =================
-const PAGE = { home: [pages.home, rightHome], editor: [pageEditor, null], hook: [pageHook, null], subtitles: [pageSubs, null], layout: [pageLayout, null], headlines: [pageHeads, null], effects: [pageEffects, null], sounds: [pageSounds, null], export: [pageExport, null], settings: [pageSettings, null] };
+const PAGE = { home: [pages.home, rightHome], editor: [pageEditor, null], hook: [pageHook, null], subtitles: [pageSubs, null], layout: [pageLayout, null], headlines: [pageHeads, null], graphics: [pageGraphics, null], effects: [pageEffects, null], sounds: [pageSounds, null], export: [pageExport, null], settings: [pageSettings, null] };
 function rightFor(it) {
   const t = S.tab;
   if (t === 'home') return rightHome(it);
   if (t === 'editor') return rightEditor();
   if (t === 'export') return rightExport(it);
-  if (t === 'subtitles' || t === 'headlines' || t === 'sounds' || t === 'hook') return rightStage(it);
+  if (t === 'subtitles' || t === 'headlines' || t === 'sounds' || t === 'hook' || t === 'graphics') return rightStage(it);
   if (t === 'effects') return curClip() ? rightStage(it, null) : h('div');
   if (t === 'layout') return curClip() ? rightStage(it, () => srcMap(curClip())) : h('div');
   const p = h('div', {}, h('div', { class: 'ptitle' }, it ? it.label : 'Settings'));
@@ -848,7 +970,7 @@ function rightFor(it) {
 }
 function renderRight() {
   const it = items[T.row]; const r = $('#right');
-  if (!['editor', 'hook', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) { T.stageClip = null; }
+  if (!['editor', 'hook', 'subtitles', 'layout', 'headlines', 'graphics', 'effects', 'sounds', 'export'].includes(S.tab)) { T.stageClip = null; }
   const node = rightFor(it && it.type !== 'sec' ? it : null);
   if (node && !(it && it.desc == null && S.tab === 'settings')) r.replaceChildren(node);
   if (it && it.desc && ['home', 'editor'].includes(S.tab) && it.type !== 'video' && it.type !== 'clip' && node) node.append(h('div', { class: 'pdesc', html: it.desc }));
@@ -933,7 +1055,7 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('dragover', (e) => e.preventDefault());
 api.onDrop(async (p) => { if (!/\.(mp4|mkv|mov|webm|avi|m4v)$/i.test(p)) return toast('That is not a supported video file.', true); try { addVideo(await api.importPath(p)); } catch (x) { toast(x.message, true); } });
-addEventListener('resize', () => { Stage.cv = null; if (['editor', 'hook', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) renderRight(); });
+addEventListener('resize', () => { Stage.cv = null; if (['editor', 'hook', 'subtitles', 'layout', 'headlines', 'graphics', 'effects', 'sounds', 'export'].includes(S.tab)) renderRight(); });
 window.onerror = (m) => toast('Unexpected error: ' + m, true);
 addEventListener('unhandledrejection', (e) => toast('Error: ' + (e.reason?.message || e.reason), true));
 

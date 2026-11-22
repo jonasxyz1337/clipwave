@@ -17,18 +17,36 @@
     const f = await inv('outro_paths', { title: o.title || '', sub: o.sub || '' });
     if (f.cached) return f;
     await window.renderOutro({ title: o.title, sub: o.sub }, {
-      begin: (name) => inv('outro_begin', { path: f[name] }),
-      frame: (rgba) => TA.core.invoke('outro_frame', rgba).catch((e) => { throw asError(e); }),
-      end: () => inv('outro_end'),
+      begin: (name) => inv('enc_begin', { path: f[name], kind: 'rgba' }),
+      frame: (rgba) => TA.core.invoke('enc_frame', rgba).catch((e) => { throw asError(e); }),
+      end: () => inv('enc_end'),
     });
     return f;
+  }
+
+  // ---------- motion graphics: each one rendered once to a transparent video (cached by its look) ----------
+  async function ensureGfx(list, onProgress) {
+    const out = [];
+    for (const [i, it] of (list || []).filter((x) => Gfx.TYPES[x.type] && x.end > x.start).entries()) {
+      const f = await inv('gfx_path', { key: Gfx.cacheKey(it) });
+      if (!f.cached) {
+        onProgress && onProgress(i);
+        await Gfx.render(it, {
+          begin: () => inv('enc_begin', { path: f.path, kind: 'png' }),
+          frame: (png) => TA.core.invoke('enc_frame', png).catch((e) => { throw asError(e); }),
+          end: () => inv('enc_end'),
+        });
+      }
+      out.push({ path: f.path, start: it.start, end: it.end });
+    }
+    return out;
   }
 
   // ---------- one export job -> ffmpeg spec ----------
   const fmtA = 'aformat=channel_layouts=stereo:sample_rates=48000';
   const fwd = (f) => f.replace(/\\/g, '/').replace(/'/g, "'\\''");
 
-  async function buildSpec(job, seg) {
+  async function buildSpec(job, seg, gfxSegs = []) {
     const { sub, head, layout, words } = job;
     const dur = job.end - job.start, od = job.outroDur || 0, hk = job.hook, hl = hk ? hk.len : 0;
     const fps = job.fps || 30, d3 = dur.toFixed(3);
@@ -38,11 +56,26 @@
     const g = [], extraIn = [];
     const files = {};
 
-    // video: layout -> timed effect boxes -> captions
-    const fx = Shared.fxGraph(job.fx || [], 'vc');
-    g.push(`${Shared.filterGraph(layout, job.w, job.h)}[vc]`);
+    // video: layout -> facecam zooms -> timed effect boxes -> captions -> motion graphics
+    const cz = (job.fx || []).filter((f) => f.type === 'camzoom' && f.end > f.start);
+    const czOk = cz.length && Shared.camZoomRect(layout, job.w, job.h);
+    let src = '0:v';
+    if (czOk) { g.push(`[0:v]split=${cz.length + 1}[src]${cz.map((_, i) => `[czs${i}]`).join('')}`); src = 'src'; }
+    g.push(`${Shared.filterGraph(layout, job.w, job.h, src)}[vc]`);
+    const czg = czOk ? Shared.camZoomGraph(cz, 'vc', cz.map((_, i) => `czs${i}`), layout, job.w, job.h, Math.round(job.srcFps || 30)) : { graph: '', out: 'vc' };
+    if (czg.graph) g.push(czg.graph);
+    const fx = Shared.fxGraph(job.fx || [], czg.out);
     if (fx.graph) g.push(fx.graph);
-    g.push(`[${fx.out}]ass=subs.ass:fontsdir=fonts,format=yuv420p${od ? `,fps=${fps},setsar=1` : ''}[va]`);
+    g.push(`[${fx.out}]ass=subs.ass:fontsdir=fonts[vs]`);
+    // graphics are extra inputs after outro (+voice) and sounds
+    const gfxBase = 1 + (od ? 1 : 0) + (od && seg && seg.voice ? 1 : 0) + sounds.length;
+    let gcur = 'vs';
+    gfxSegs.forEach((gs, i) => {
+      const S = gs.start.toFixed(3), E = gs.end.toFixed(3);
+      g.push(`[${gfxBase + i}:v]setpts=PTS-STARTPTS+${S}/TB,format=rgba[gf${i}]`, `[${gcur}][gf${i}]overlay=0:0:eof_action=pass:enable='between(t\\,${S}\\,${E})'[gv${i}]`);
+      gcur = `gv${i}`;
+    });
+    g.push(`[${gcur}]format=yuv420p${od ? `,fps=${fps},setsar=1` : ''}[va]`);
 
     // hook: teaser = a piece of the finished clip (captions included) with a label, then a white flash into the clip
     let vcur = 'va';
@@ -102,6 +135,7 @@
       else amap = `[${aOut}]`;
     }
 
+    gfxSegs.forEach((gs) => extraIn.push('-i', gs.path));
     const base = ['-y', '-hide_banner', '-ss', String(job.start), '-t', String(dur), '-i', job.videoPath, ...extraIn, '-filter_complex', g.join(';'), '-map', vmap, '-map', amap];
     const tail = [...(job.fps && !od ? ['-r', String(job.fps)] : []), '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', job.out];
     const enc = {
@@ -132,7 +166,9 @@
           seg = await ensureOutro(job.outro || {});
           if (cancelled) throw new Error('Cancelled');
         }
-        const size = await inv('export_one', { spec: await buildSpec(job, seg) });
+        const gfxSegs = await ensureGfx(job.gfx, (i) => fire({ type: 'export', jobId: job.jobId, pct: 0, msg: `Rendering graphics ${i + 1}…` }));
+        if (cancelled) throw new Error('Cancelled');
+        const size = await inv('export_one', { spec: await buildSpec(job, seg, gfxSegs) });
         results.push({ jobId: job.jobId, out: job.out, size });
         fire({ type: 'export', jobId: job.jobId, pct: 100, done: true, out: job.out, size });
       } catch (e) {
@@ -168,6 +204,7 @@
     updateState: () => inv('update_state'),
     pickSound: () => inv('sound_pick'),
     findHighlight: (req) => inv('find_highlight', { req }),
+    chatReplay: (req) => inv('chat_replay', { req }),
     fileUrl: (p) => TA.core.convertFileSrc(p),
     onDrop: (cb) => { dropCb = cb; },
     onEvent: (cb) => listeners.push(cb),

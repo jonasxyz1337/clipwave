@@ -93,7 +93,7 @@ pub fn cancel_export() -> bool {
     true
 }
 
-// ---------- outro: the UI draws frames on a canvas, we pipe them into ffmpeg (cached per title/tagline) ----------
+// ---------- canvas-drawn video (outro, motion graphics): the UI draws frames, we pipe them into ffmpeg ----------
 const OUTRO_VERSION: &str = "v3";
 
 #[tauri::command]
@@ -105,22 +105,38 @@ pub fn outro_paths(app: AppHandle, title: String, sub: String) -> Value {
     json!({ "intro": intro, "loop": lp, "cached": intro.exists() && lp.exists(), "voice": voice.exists().then_some(voice) })
 }
 
+/// Cache file for one rendered motion graphic (key = hash of its look + length, computed by the UI).
+#[tauri::command]
+pub fn gfx_path(key: String) -> Value {
+    let k = format!("{:x}", md5::compute(key));
+    let p = sub_dir("outro-cache").join(format!("gfx_{}.mov", &k[..16]));
+    json!({ "path": p, "cached": p.exists() })
+}
+
 struct Enc {
     child: Child,
     stdin: Option<ChildStdin>,
     path: PathBuf,
+    part: PathBuf,
     err: Arc<Mutex<String>>,
 }
 static ENC: Mutex<Option<Enc>> = Mutex::new(None);
 
+/// `kind`: "rgba" = raw 1080x1920 RGBA frames -> H.264 (opaque outro);
+///         "png"  = PNG frames with transparency -> PNG-in-MOV (overlays with alpha).
 #[tauri::command]
-pub fn outro_begin(app: AppHandle, path: String) -> Res<()> {
-    let part = format!("{path}.part.mp4");
+pub fn enc_begin(app: AppHandle, path: String, kind: String) -> Res<()> {
+    let p = PathBuf::from(&path);
+    let ext = p.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mp4".into());
+    let part = p.with_extension(format!("part.{ext}"));
+    let part_s = part.to_string_lossy().into_owned();
+    let args: Vec<&str> = match kind.as_str() {
+        "rgba" => vec!["-y", "-hide_banner", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1080x1920", "-r", "30", "-i", "-", "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "13", "-g", "30", "-pix_fmt", "yuv420p", &part_s],
+        "png" => vec!["-y", "-hide_banner", "-f", "image2pipe", "-framerate", "30", "-c:v", "png", "-i", "-", "-c:v", "png", "-pix_fmt", "rgba", &part_s],
+        k => return Err(format!("unknown encoder kind {k}")),
+    };
     let mut cmd = Command::new(tool(&app, "ffmpeg"));
-    cmd.args(["-y", "-hide_banner", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1080x1920", "-r", "30", "-i", "-", "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "13", "-g", "30", "-pix_fmt", "yuv420p", &part])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    cmd.args(&args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
     hidden(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("Cannot start ffmpeg: {e}"))?;
     let err = Arc::new(Mutex::new(String::new()));
@@ -141,29 +157,28 @@ pub fn outro_begin(app: AppHandle, path: String) -> Res<()> {
         }
     });
     let stdin = child.stdin.take();
-    *ENC.lock().unwrap() = Some(Enc { child, stdin, path: PathBuf::from(path), err });
+    *ENC.lock().unwrap() = Some(Enc { child, stdin, path: p, part, err });
     Ok(())
 }
 
-/// One raw RGBA 1080x1920 frame, sent as binary IPC body.
+/// One frame (raw RGBA or a PNG file), sent as binary IPC body.
 #[tauri::command]
-pub fn outro_frame(request: tauri::ipc::Request<'_>) -> Res<()> {
+pub fn enc_frame(request: tauri::ipc::Request<'_>) -> Res<()> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("expected raw frame bytes".into()) };
     let mut g = ENC.lock().unwrap();
-    let enc = g.as_mut().ok_or("outro encoder not running")?;
-    enc.stdin.as_mut().ok_or("outro encoder closed")?.write_all(bytes).map_err(|e| format!("outro encode failed: {e}"))
+    let enc = g.as_mut().ok_or("frame encoder not running")?;
+    enc.stdin.as_mut().ok_or("frame encoder closed")?.write_all(bytes).map_err(|e| format!("frame encode failed: {e}"))
 }
 
 #[tauri::command]
-pub fn outro_end() -> Res<()> {
-    let mut enc = ENC.lock().unwrap().take().ok_or("outro encoder not running")?;
+pub fn enc_end() -> Res<()> {
+    let mut enc = ENC.lock().unwrap().take().ok_or("frame encoder not running")?;
     drop(enc.stdin.take());
     let ok = enc.child.wait().map(|s| s.success()).unwrap_or(false);
-    let part = PathBuf::from(format!("{}.part.mp4", enc.path.display()));
     if !ok {
-        let _ = std::fs::remove_file(&part);
+        let _ = std::fs::remove_file(&enc.part);
         let e = enc.err.lock().unwrap();
-        return Err(format!("Outro render failed: {}", tail(&e, 3, 300)));
+        return Err(format!("Rendering graphics failed: {}", tail(&e, 3, 300)));
     }
-    std::fs::rename(&part, &enc.path).map_err(|e| e.to_string())
+    std::fs::rename(&enc.part, &enc.path).map_err(|e| e.to_string())
 }

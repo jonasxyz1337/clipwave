@@ -1,4 +1,5 @@
 //! Clipwave – Tauri backend. The UI (src/) is plain HTML/JS; everything that touches the system lives here.
+mod chat;
 mod export;
 mod media;
 mod store;
@@ -38,6 +39,7 @@ pub fn run() {
             media::video_file,
             media::video_path,
             media::find_highlight,
+            chat::chat_replay,
             stt::transcribe,
             stt::eleven_connect,
             stt::eleven_stop,
@@ -46,9 +48,10 @@ pub fn run() {
             export::export_reset,
             export::cancel_export,
             export::outro_paths,
-            export::outro_begin,
-            export::outro_frame,
-            export::outro_end,
+            export::gfx_path,
+            export::enc_begin,
+            export::enc_frame,
+            export::enc_end,
             update::update_check,
             update::update_install,
             update::update_state,
