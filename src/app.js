@@ -147,7 +147,7 @@ function drawHead(ctx, k, clip, t) {
     g.lines.forEach((l, i) => { ctx.globalAlpha = a * (i ? 0.82 : 1); ctx.font = `${i ? '' : 'bold '}${l.sz * 0.86 * k}px "${hd.font}", sans-serif`; ctx.fillText(l.t, l.x * k, l.y * k); });
     ctx.restore(); return;
   }
-  const lines = Shared.wrapHeadline(hd.text, hd.size, hd.font), fs = hd.size * 0.86 * k, lh = fs * 1.22;
+  const lines = Shared.wrapHeadline(hd.text, hd.size, hd.font, hd.outline, !hd.box), fs = hd.size * Shared.assScale(hd.font) * k, lh = fs * 1.22;
   ctx.font = `${hd.box ? '' : 'bold '}${fs}px "${hd.font}", sans-serif`; ctx.textBaseline = 'middle';
   let a = 1; if (hd.anim !== 'none' && !V.paused) a = clamp(t / 0.25, 0, 1); if (hd.anim === 'fade' && hd.duration > 0) a = Math.min(a, clamp((hd.duration - t) / 0.35, 0, 1));
   ctx.save(); ctx.globalAlpha = a;

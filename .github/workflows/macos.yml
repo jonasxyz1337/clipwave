@@ -58,6 +58,9 @@ jobs:
           ./bin/yt-dlp --version
           ./bin/whisper/whisper-cli --help > /dev/null 2>&1 || ./bin/whisper/whisper-cli -h | head -2
 
+      - name: Caption self-test (white boxes behind text must render with this libass)
+        run: node scripts/caption-selftest.js bin/ffmpeg
+
       - run: npm ci
 
       - name: Build app + dmg

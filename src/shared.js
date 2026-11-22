@@ -159,13 +159,26 @@
   const esc = (s) => s.replace(/[{}\\]/g, '');
   const disp = (w, sub) => esc(sub.uppercase ? w.toUpperCase() : w);
 
-  function wrapHeadline(text, size, font) {
-    const maxChars = Math.max(6, Math.floor(960 / (size * (font === 'Impact' ? 0.45 : 0.56))));
+  // wraps by estimated text width (not a fixed character count) so lines use nearly the full frame width
+  // libass sizes a font so that ascent + descent = font size, so glyphs come out smaller than in a browser
+  const ASS_SCALE = { 'Impact': 0.82, 'Arial Black': 0.709, 'Segoe UI Black': 0.751, 'Segoe UI Semibold': 0.751, 'Bahnschrift': 0.999, 'Segoe UI': 0.751, 'Trebuchet MS': 0.861, 'Verdana': 0.822, 'Georgia': 0.88, 'Comic Sans MS': 0.717, 'Arial': 0.894 };
+  const assScale = (font) => ASS_SCALE[font] || 0.86;
+  // exact text width as libass will draw it, measured with the real font (browser); rough estimate elsewhere
+  let measureCtx = null;
+  function assTextW(t, size, font, bold) {
+    if (!measureCtx && typeof OffscreenCanvas !== 'undefined') measureCtx = new OffscreenCanvas(8, 8).getContext('2d');
+    if (!measureCtx) return textW(t, size) * 1.1;
+    measureCtx.font = `${bold ? 'bold ' : ''}${size * assScale(font)}px "${font}", sans-serif`;
+    return measureCtx.measureText(t).width;
+  }
+  // breaks only when the next word really does not fit the frame width any more
+  function wrapHeadline(text, size, font, outline = 0, bold = true) {
+    const maxW = 1030 - 2 * outline, fits = (t) => assTextW(t, size, font, bold) <= maxW;
     const out = [];
     text.split(/\r?\n/).forEach((line) => {
       let cur = '';
       line.split(/\s+/).filter(Boolean).forEach((w) => {
-        if ((cur + ' ' + w).trim().length > maxChars && cur) { out.push(cur); cur = w; } else cur = (cur + ' ' + w).trim();
+        if (cur && !fits(cur + ' ' + w)) { out.push(cur); cur = w; } else cur = (cur + ' ' + w).trim();
       });
       out.push(cur);
     });
@@ -203,7 +216,9 @@
     lines.push('[V4+ Styles]', 'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding');
     lines.push(`Style: Sub,${sub.font},${sub.size},${ac(sub.color)},${ac(sub.color)},${ac(sub.outlineColor)},${ac(sub.shadowColor, 60)},${sub.bold ? -1 : 0},0,0,0,100,100,0,0,1,${sub.outline},${sub.shadow},5,40,40,40,1`);
     const hb = head.box;
-    lines.push(`Style: Head,${head.font},${head.size},${ac(head.color)},${ac(head.color)},${ac(head.outlineColor)},${ac('#000000', hb ? 255 : 80)},${hb ? 0 : -1},0,0,0,100,100,0,0,${hb ? 3 : 1},${head.outline},${hb ? 0 : head.shadow},5,60,60,40,1`);
+    // box mode (BorderStyle 3): older libass paints the box with OutlineColour, newer libass (macOS build) with BackColour –
+    // so both carry the box color; shadow is 0 in box mode, so BackColour is not used for anything else
+    lines.push(`Style: Head,${head.font},${head.size},${ac(head.color)},${ac(head.color)},${ac(head.outlineColor)},${hb ? ac(head.outlineColor) : ac('#000000', 80)},${hb ? 0 : -1},0,0,0,100,100,0,0,${hb ? 3 : 1},${head.outline},${hb ? 0 : head.shadow},5,60,60,40,1`);
     lines.push('', '[Events]', 'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text');
 
     if (showSubs && words && words.length) {
@@ -240,8 +255,9 @@
         g.lines.forEach((l, i) => lines.push(`Dialogue: 2,${ts(0)},${ts(end)},Head,,0,0,0,,{\\an4\\pos(${l.x},${l.y})\\fs${l.sz}\\bord0\\shad0\\b${i === 0 ? 1 : 0}${i ? '\\1a&H30&' : ''}${fd}}${esc(l.t)}`));
         return lines.join('\n') + '\n';
       }
-      const txt = wrapHeadline(head.text, head.size, head.font).map(esc).join('\\N');
-      lines.push(`Dialogue: 1,${ts(0)},${ts(end)},Head,,0,0,0,,{\\an5\\pos(${W / 2},${hy})${anim}}${txt}`);
+      const txt = wrapHeadline(head.text, head.size, head.font, head.outline, !head.box).map(esc).join('\\N');
+      // \q2: we break the lines ourselves (exact widths), libass must not add its own breaks
+      lines.push(`Dialogue: 1,${ts(0)},${ts(end)},Head,,0,0,0,,{\\q2\\an5\\pos(${W / 2},${hy})${anim}}${txt}`);
     }
     return lines.join('\n') + '\n';
   }
@@ -327,6 +343,6 @@
     return L.join('\n') + '\n';
   }
 
-  const api = { FONTS_MAC, camZoomRect, camZoomAt, camZoomGraph, subBoxLines, textW, DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
+  const api = { assScale, FONTS_MAC, camZoomRect, camZoomAt, camZoomGraph, subBoxLines, textW, DEFAULT_HOOK, HOOK_STYLE, hookWindow, buildHookAss, cardGeom, fxRect, fxGraph, DEFAULT_OUTRO, outroDuration, buildOutroAss, W, H, FONTS, SUB_PRESETS, HEAD_PRESETS, DEFAULT_LAYOUT, clone, clamp, computeLayout, filterGraph, autoImportant, groupWords, subEvents, buildAss, wrapHeadline };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else g.Shared = api;
 })(typeof window !== 'undefined' ? window : globalThis);
