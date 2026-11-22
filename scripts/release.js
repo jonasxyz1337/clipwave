@@ -12,7 +12,8 @@ const keyFile = path.join(os.homedir(), '.clipwave-keys', 'updater.key');
 if (!fs.existsSync(keyFile)) throw new Error('Signing key missing: ' + keyFile);
 const target = process.env.CARGO_TARGET_DIR || path.join(root, 'src-tauri', 'target');
 const env = { ...process.env, CARGO_TARGET_DIR: target, TAURI_SIGNING_PRIVATE_KEY: fs.readFileSync(keyFile, 'utf8'), TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '' };
-const sh = (cmd, args, o = {}) => execFileSync(cmd, args, { stdio: 'inherit', cwd: root, env, shell: process.platform === 'win32', ...o });
+// npx is a .cmd script on Windows and needs a shell; everything else runs directly so arguments with spaces stay intact
+const sh = (cmd, args) => execFileSync(cmd, args, { stdio: 'inherit', cwd: root, env, shell: cmd === 'npx' && process.platform === 'win32' });
 
 if (!process.env.SKIP_BUILD) sh('npx', ['tauri', 'build']);
 
