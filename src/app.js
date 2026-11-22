@@ -14,7 +14,7 @@ function h(tag, props, ...kids) {
   return e;
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-const fileUrl = (p) => 'file:///' + encodeURI(p.replace(/\\/g, '/')).replace(/#/g, '%23').replace(/\?/g, '%3F');
+const fileUrl = (p) => api.fileUrl(p);
 const fmt = (t, d = 1) => {
   t = Math.max(0, t || 0); const hh = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
   const ss = s.toFixed(d).padStart(d ? d + 3 : 2, '0');
@@ -39,6 +39,18 @@ function ask(title, value = '', ok = 'OK') {
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') close(inp.value); if (e.key === 'Escape') close(null); });
     m.replaceChildren(h('div', { class: 'dlg' }, h('h3', {}, title), inp, h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: () => close(null) }, 'Cancel'), h('button', { class: 'btn fill', onclick: () => close(inp.value) }, ok))));
     m.classList.remove('hidden'); inp.focus(); inp.select();
+  });
+}
+
+// Yes/no dialog for destructive actions. "Cancel" has focus, so Enter/Escape never delete by accident.
+function confirmDlg(title, text, ok = 'Delete') {
+  return new Promise((res) => {
+    const m = $('#modal');
+    const close = (v) => { removeEventListener('keydown', key, true); m.classList.add('hidden'); m.replaceChildren(); res(v); };
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } };
+    const cancel = h('button', { class: 'btn', onclick: () => close(false) }, 'Cancel');
+    m.replaceChildren(h('div', { class: 'dlg' }, h('h3', {}, title), h('p', { class: 'dlgtext' }, text), h('div', { class: 'btnrow' }, cancel, h('button', { class: 'btn fill danger', onclick: () => close(true) }, ok))));
+    addEventListener('keydown', key, true); m.classList.remove('hidden'); cancel.focus();
   });
 }
 
@@ -342,8 +354,8 @@ function addClip() {
   render(true);
 }
 function selectClip(c) { S.selClip = c.id; T.range = { start: c.start, end: c.end }; V.currentTime = c.start; save(); render(true); }
-function deleteClip(c) { S.clips = S.clips.filter((x) => x.id !== c.id); if (S.selClip === c.id) S.selClip = null; save(); render(true); }
-function removeVideo(v) { api.purgeVideo([v.path, v.thumb]).catch(() => {}); S.videos = S.videos.filter((x) => x.id !== v.id); S.clips = S.clips.filter((c) => c.videoId !== v.id); if (S.selVideo === v.id) { S.selVideo = null; S.selClip = null; } save(); render(true); toast('Video removed. Downloaded files were deleted; your own files are never touched.'); }
+async function deleteClip(c) { if (!(await confirmDlg('Delete clip?', `“${c.name}” and its subtitles, effects and settings will be deleted.`))) return; S.clips = S.clips.filter((x) => x.id !== c.id); if (S.selClip === c.id) S.selClip = null; save(); render(true); }
+async function removeVideo(v) { const n = S.clips.filter((c) => c.videoId === v.id).length; if (!(await confirmDlg('Remove video?', `“${v.title}”${n ? ` and its ${n} clip${n > 1 ? 's' : ''}` : ''} will be removed. If Clipwave downloaded it, the video file is deleted too (your own files stay untouched). Exported clips are kept.`, 'Remove'))) return; api.purgeVideo([v.path, v.thumb]).catch(() => {}); S.videos = S.videos.filter((x) => x.id !== v.id); S.clips = S.clips.filter((c) => c.videoId !== v.id); if (S.selVideo === v.id) { S.selVideo = null; S.selClip = null; } save(); render(true); toast('Video removed. Downloaded files were deleted; your own files are never touched.'); }
 
 function buildPlayer(v) {
   const view = T.view;
@@ -870,7 +882,7 @@ addEventListener('keydown', (e) => {
   else if (S.tab === 'home' && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') navigator.clipboard.readText().then((t) => { if (/^https?:\/\//i.test(t.trim())) { T.urlText = t.trim(); render(true); toast('Link pasted – press Enter on “Import from link”.'); } }).catch(() => {});
 });
 addEventListener('dragover', (e) => e.preventDefault());
-addEventListener('drop', async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (!f) return; const p = api.pathOf(f); if (!/\.(mp4|mkv|mov|webm|avi|m4v)$/i.test(p)) return toast('That is not a supported video file.', true); try { addVideo(await api.importPath(p)); } catch (x) { toast(x.message, true); } });
+api.onDrop(async (p) => { if (!/\.(mp4|mkv|mov|webm|avi|m4v)$/i.test(p)) return toast('That is not a supported video file.', true); try { addVideo(await api.importPath(p)); } catch (x) { toast(x.message, true); } });
 addEventListener('resize', () => { Stage.cv = null; if (['editor', 'subtitles', 'layout', 'headlines', 'effects', 'sounds', 'export'].includes(S.tab)) renderRight(); });
 window.onerror = (m) => toast('Unexpected error: ' + m, true);
 addEventListener('unhandledrejection', (e) => toast('Error: ' + (e.reason?.message || e.reason), true));

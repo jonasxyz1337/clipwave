@@ -212,3 +212,5 @@ input[type=color] { position: absolute; opacity: 0; pointer-events: none; width:
 .tab { border-radius: 3px; transition: background .15s, color .15s; }
 .tab:not(.on):hover { background: rgba(255,255,255,.14); }
 .row:focus-visible, .btn:focus-visible, .tab:focus-visible { outline: 2px solid var(--pop); outline-offset: 2px; }
+.dlg .dlgtext { font-size: 13.5px; line-height: 1.5; opacity: .92; }
+.btn.fill.danger:hover { background: linear-gradient(135deg, #ff4f6d, #d6246e); border-color: #ff4f6d; }

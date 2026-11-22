@@ -1,12 +1,14 @@
 'use strict';
+// Rendered inside the app window: window.renderOutro(params, sink) draws every frame and hands it to sink.frame().
+window.renderOutro = async function renderOutro(params, sink) {
 // Motion-graphics outro, drawn frame by frame. Everything after the intro is periodic (period P),
 // so the "loop" part can be repeated seamlessly to fill any outro length.
 const W = 1080, H = 1920, FPS = 30, P = 3.5, T_INTRO = 2.5;
-const params = JSON.parse(decodeURIComponent(location.hash.slice(1)) || '{}');
+params = params || {};
 const TITLE = (params.title || 'CLIPWAVE').toUpperCase().slice(0, 24);
 const TAG = (params.sub || '').slice(0, 40);
 
-const cv = document.getElementById('c'); cv.width = W; cv.height = H;
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
 const ctx = cv.getContext('2d', { willReadFrequently: true });
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const eOutCubic = (x) => 1 - Math.pow(1 - clamp(x), 3);
@@ -153,15 +155,12 @@ function draw(t) {
   const black = 1 - eOutCubic(t / 0.45); if (black > 0.002) { ctx.fillStyle = `rgba(0,0,0,${black})`; ctx.fillRect(0, 0, W, H); }
 }
 
-(async function run() {
+if (document.fonts && document.fonts.load) { await document.fonts.load(`700 100px ${FONT}`); await document.fonts.load(`500 54px ${FONT}`); }
+const segs = [{ name: 'intro', from: 0, to: Math.round(T_INTRO * FPS) }, { name: 'loop', from: Math.round(T_INTRO * FPS), to: Math.round((T_INTRO + P) * FPS) }];
+for (const s of segs) {
+  await sink.begin(s.name);
   try {
-    if (document.fonts && document.fonts.load) { await document.fonts.load(`700 100px ${FONT}`); await document.fonts.load(`500 54px ${FONT}`); }
-    const segs = [{ name: 'intro', from: 0, to: Math.round(T_INTRO * FPS) }, { name: 'loop', from: Math.round(T_INTRO * FPS), to: Math.round((T_INTRO + P) * FPS) }];
-    for (const s of segs) {
-      await window.o.begin(s.name);
-      for (let f = s.from; f < s.to; f++) { draw(f / FPS); await window.o.frame(ctx.getImageData(0, 0, W, H).data.buffer); }
-      await window.o.end();
-    }
-    await window.o.done();
-  } catch (e) { await window.o.done(String((e && e.message) || e)); }
-})();
+    for (let f = s.from; f < s.to; f++) { draw(f / FPS); await sink.frame(new Uint8Array(ctx.getImageData(0, 0, W, H).data.buffer)); }
+  } finally { await sink.end(); }
+}
+};
