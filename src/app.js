@@ -1064,7 +1064,8 @@ function applyTheme() {
   const a = ACCENTS[S.settings.accent] || ACCENTS.Magenta; const r = document.documentElement.style;
   r.setProperty('--a1', a[0]); r.setProperty('--a2', a[1]); r.setProperty('--a3', a[2]);
   document.body.classList.toggle('nomotion', !S.settings.motion); document.body.classList.toggle('nopalms', !S.settings.palms);
-  document.documentElement.style.zoom = S.settings.uiScale / 100;
+  // native webview zoom: CSS `zoom` breaks click positions in WebKit (macOS) – buttons could not be hit
+  api.setZoom(S.settings.uiScale / 100).catch(() => {});
 }
 function palm(x, y, ht, lean) {
   const tx = x + lean, ty = y - ht; let d = '';

@@ -1,6 +1,11 @@
 {
   "identifier": "default",
-  "description": "Main window: core APIs (events, asset URLs). All app commands are Clipwave's own.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Main window: core APIs (events, asset URLs) and UI zoom. All app commands are Clipwave's own.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-set-webview-zoom"
+  ]
 }

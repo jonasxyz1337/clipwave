@@ -210,6 +210,7 @@
     findHighlight: (req) => inv('find_highlight', { req }),
     chatReplay: (req) => inv('chat_replay', { req }),
     fileUrl: (p) => TA.core.convertFileSrc(p),
+    setZoom: (f) => TA.webview.getCurrentWebview().setZoom(f),
     onDrop: (cb) => { dropCb = cb; },
     onEvent: (cb) => listeners.push(cb),
   };
